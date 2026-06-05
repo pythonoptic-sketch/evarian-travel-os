@@ -32,7 +32,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700;800&family=Inter+Tight:wght@500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styles.css?v=20260605-superhuman">
+    <link rel="stylesheet" href="assets/styles.css?v=20260605-simple">
     <script src="assets/site.js?v=20260605-minimal-front" defer></script>
     <script type="application/ld+json">
       {
@@ -72,7 +72,6 @@
       </a>
       <nav aria-label="Primary navigation">
         <a href="#work">How it works</a>
-        <a href="#system">System</a>
         <a href="#waitlist">Contact</a>
       </nav>
     </header>
@@ -94,7 +93,7 @@
 
         <div class="hero-center">
           <p class="eyebrow">Agentic travel booking</p>
-          <h1 id="hero-title">One request. A trip that stays watched.</h1>
+          <h1 id="hero-title">Tell Evarian where to go.</h1>
           <form class="hero-command" id="hero-command-form" aria-label="Ask Evarian">
             <span class="command-plus" aria-hidden="true">+</span>
             <label class="sr-only" for="hero-intent">Travel request</label>
@@ -107,85 +106,35 @@
             >
             <button type="submit">Start</button>
           </form>
-          <p class="hero-status" id="chat-status" role="status">Tell Evarian where you want to go. It prepares the route, monitors the moving parts, and asks before anything books.</p>
-          <div class="authority-panel" aria-label="Booking authority">
-            <label class="authority-option">
-              <input type="radio" name="booking_authority" value="ask" checked>
-              <span>Ask before charges<small>Default</small></span>
-            </label>
-            <label class="authority-option">
-              <input type="radio" name="booking_authority" value="autopilot">
-              <span>Autobook under cap<small>Airport rides</small></span>
-            </label>
-            <label class="authority-cap" for="authority-cap">
-              <span>Cap</span>
-              <input id="authority-cap" type="number" min="0" max="5000" step="5" value="75" aria-label="Autobook cap in dollars">
-            </label>
+          <p class="hero-status" id="chat-status" role="status">It drafts the trip, watches the moving parts, and asks before anything books.</p>
+          <div class="hero-thread" aria-label="Evarian flow">
+            <span>Plan</span>
+            <span>Monitor</span>
+            <span>Approve</span>
           </div>
         </div>
       </section>
 
-      <section class="intro-section" aria-labelledby="intro-title">
-        <div class="intro-visual" aria-hidden="true">
-          <span></span>
-        </div>
-        <div class="intro-copy">
-          <h2 id="intro-title">
-            One request becomes a plan, a watchlist, and a clean next action.
-          </h2>
-          <p>Evarian is being built for travelers who want fewer tabs, fewer loose ends, and clear control over when the agent may spend.</p>
-          <a href="#work">See the sequence</a>
-        </div>
-      </section>
-
-      <section class="work-section" id="work" aria-labelledby="work-title">
-        <div class="section-heading">
-          <p class="eyebrow">How it works</p>
-          <h2 id="work-title">The trip moves only when you say yes.</h2>
-        </div>
-        <div class="work-grid">
-          <article class="work-card work-card-large">
+      <section class="flow-section" id="work" aria-labelledby="work-title">
+        <p class="eyebrow">How it works</p>
+        <h2 id="work-title">One request becomes a watched trip order.</h2>
+        <ol class="flow-list">
+          <li>
             <span>01</span>
-            <h3>Ask in plain English</h3>
-            <p>Destination, dates, pace, budget, hotel taste, loyalty, and constraints. No forms first.</p>
-          </article>
-          <article class="work-card">
+            <strong>Ask</strong>
+            <p>Say the trip in one sentence.</p>
+          </li>
+          <li>
             <span>02</span>
-            <h3>Get a trip brief</h3>
-            <p>The agent turns the request into options, timing, risk, and the next decision.</p>
-          </article>
-          <article class="work-card">
+            <strong>Review</strong>
+            <p>Get a clear plan and the next decision.</p>
+          </li>
+          <li>
             <span>03</span>
-            <h3>Stay covered</h3>
-            <p>Flights, traffic, hotel windows, and changes are watched after the plan is created.</p>
-          </article>
-          <article class="work-card work-card-accent">
-            <span>04</span>
-            <h3>Choose authority</h3>
-            <p>Ask before every charge, or let Evarian book narrowly scoped airport rides under your cap.</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="system-section" id="system" aria-labelledby="system-title">
-        <div class="section-heading">
-          <p class="eyebrow">System</p>
-          <h2 id="system-title">A calm surface for a complex trip.</h2>
-        </div>
-        <div class="system-grid">
-          <article>
-            <h3>Plan</h3>
-            <p>Flights, hotels, rides, confirmations, deadlines, and preferences are shaped into one readable brief.</p>
-          </article>
-          <article>
-            <h3>Monitor</h3>
-            <p>Changes are tracked so the next move can be prepared before the traveler has to chase it.</p>
-          </article>
-          <article>
-            <h3>Execute</h3>
-            <p>The agent can execute only inside the authority the traveler selected.</p>
-          </article>
-        </div>
+            <strong>Approve</strong>
+            <p>You confirm before bookings or charges.</p>
+          </li>
+        </ol>
       </section>
 
       <section class="waitlist-section" id="waitlist" aria-labelledby="waitlist-title">
@@ -212,7 +161,6 @@
       <p>Made for travelers who want motion without friction.</p>
       <nav aria-label="Footer navigation">
         <a href="#work">How it works</a>
-        <a href="#system">System</a>
         <a href="#waitlist">Contact</a>
       </nav>
     </footer>

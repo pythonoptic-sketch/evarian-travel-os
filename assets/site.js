@@ -15,9 +15,7 @@ function apiUrl(path) {
 }
 
 function selectedAuthority() {
-  const mode = document.querySelector('input[name="booking_authority"]:checked')?.value || "ask";
-  const cap = Math.max(0, Math.min(5000, Number(document.getElementById("authority-cap")?.value || 75)));
-  return { mode, cap };
+  return { mode: "ask", cap: 75 };
 }
 
 function storeLocalIntent(intent) {
@@ -108,16 +106,6 @@ document.getElementById("hero-command-form")?.addEventListener("submit", (event)
   const intent = input.value.trim() || "Adventure awaits";
   runHeroAgent(intent);
 });
-
-document.querySelectorAll('input[name="booking_authority"]').forEach((input) => {
-  input.addEventListener("change", () => {
-    document.querySelectorAll(".authority-option").forEach((label) => {
-      const radio = label.querySelector("input");
-      label.classList.toggle("is-selected", radio?.checked);
-    });
-  });
-});
-document.querySelector('input[name="booking_authority"]:checked')?.dispatchEvent(new Event("change"));
 
 document.getElementById("waitlist-form")?.addEventListener("submit", async (event) => {
   event.preventDefault();
