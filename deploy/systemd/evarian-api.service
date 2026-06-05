@@ -1,0 +1,23 @@
+[Unit]
+Description=Evarian Travel OS API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=evarian
+Group=evarian
+WorkingDirectory=/opt/evarian
+Environment=DATA_DIR=/var/lib/evarian
+Environment=EVARIAN_DATABASE_PATH=/var/lib/evarian/evarian.sqlite3
+EnvironmentFile=-/etc/evarian/evarian-api.env
+ExecStart=/opt/evarian/.venv/bin/uvicorn backend.travel_app:app --host 127.0.0.1 --port 8010
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/evarian
+
+[Install]
+WantedBy=multi-user.target

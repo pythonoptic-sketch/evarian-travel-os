@@ -1,0 +1,27 @@
+drinknile.com, www.drinknile.com {
+  encode zstd gzip
+  root * /opt/evarian
+
+  @travel_api path /api /api/*
+  handle @travel_api {
+    reverse_proxy 127.0.0.1:8010
+  }
+
+  handle {
+    try_files {path} /index.html
+    file_server
+  }
+}
+
+api.drinknile.com {
+  encode zstd gzip
+
+  @travel_api path /api /api/*
+  handle @travel_api {
+    reverse_proxy 127.0.0.1:8010
+  }
+
+  handle {
+    respond "Evarian API" 200
+  }
+}

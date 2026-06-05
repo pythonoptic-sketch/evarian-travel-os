@@ -1,0 +1,141 @@
+# Evarian Agentic Travel Agent System
+
+This extracts the implementation requirements from the older
+`agentic-travel-os.html` prototype and converts them into the active backend
+contract.
+
+## Product Goal
+
+Evarian should not behave like an itinerary generator. It should behave like a
+travel operating layer:
+
+```txt
+traveler intent -> managed trip order -> specialist agent work -> verification -> approval-gated execution
+```
+
+## What Must Be Implemented
+
+1. Intent capture
+   - Accept natural-language travel requests.
+   - Detect whether the traveler wants a new trip, a change, recovery, or
+     general assistance.
+   - Extract route, dates, priorities, budget, urgency, and missing details.
+
+2. Traveler preference memory
+   - Infer or store schedule, hotel, seat, loyalty, accessibility, and price
+     preferences.
+   - Keep defaults conservative until the user has explicit profile memory.
+
+3. Search and inventory
+   - Search flights, hotels, airport transfers, rail, dining, activities, and
+     supplier terms.
+   - Early prototype uses deterministic candidate scopes.
+   - Production requires supplier APIs.
+
+4. Policy and wallet guardrails
+   - Every request must have wallet caps and approval rules.
+   - No irreversible purchase, cancellation, or rebooking should execute
+     without approval.
+
+5. Recommendation and ranking
+   - Rank options by traveler priority: arrival certainty, price, comfort,
+     policy safety, speed, and serviceability.
+
+6. Verification
+   - Check missing inputs, supplier terms, refundability, payment boundaries,
+     and whether a human fallback is required.
+
+7. Execution staging
+   - Prepare holds, messages, booking payloads, cancellation requests, and
+     payment actions.
+   - Keep execution staged until approval.
+
+8. Recovery
+   - Monitor flight status, traffic, hotel check-in, fare waivers, weather, and
+     downstream risks.
+   - Prepare replacement actions when disruptions happen.
+
+9. Human escalation
+   - Package the full order context for a human operator when automation is
+     unsafe, unsupported, or low-confidence.
+
+## Agent Composition
+
+The current backend composes these agents:
+
+- `manager`: routes tasks and owns final trip order assembly.
+- `context`: extracts intent, route, priority, and missing information.
+- `profile`: applies traveler preference memory or conservative defaults.
+- `policy`: attaches wallet and approval guardrails.
+- `search`: prepares supplier search scope.
+- `recommendation`: ranks the candidate set.
+- `verification`: checks safety, missing inputs, and serviceability.
+- `execution`: stages actions without spending or modifying supplier state.
+- `recovery`: selected only for disruption or servicing requests.
+- `human_ops`: selected for high spend, low verification confidence, or unsafe
+  automation.
+
+## Current Backend Contract
+
+`POST /api/trip-orders` returns:
+
+- `manager`
+- `agent_network`
+- `delegation_plan`
+- `agent_outputs`
+- `products`
+- `permissions`
+- `autopilot`
+- `control_center`
+- `audit_events`
+- `monitoring`
+- `allowed_actions`
+
+The current frontend intentionally keeps these internals hidden. The backend
+still stores and returns them for future dashboards, internal operator tools,
+and product debugging.
+
+`POST /api/trip-orders/{order_id}/actions/evaluate` evaluates a proposed
+supplier/payment action against the policy gate. It returns:
+
+- `decision`
+- `can_execute`
+- `requires_approval`
+- `gates`
+- `failed_gates`
+- `next_step`
+
+This endpoint is the first concrete execution-safety primitive. Supplier and
+payment tools must call it before performing side effects.
+
+## Current Limitation
+
+The orchestration layer is deterministic and provider-neutral by default. The
+server has a gated OpenAI adapter, but live model calls require an active
+OpenAI billing account. The product is not yet connected to live supplier APIs.
+That is deliberate until:
+
+1. OpenAI API billing is active for the deployed backend key.
+2. Supplier APIs are selected and credentials are configured.
+3. The execution agent has real approval, audit, and rollback controls.
+
+Related policy docs:
+
+- `docs/EVARIAN_POLICY_PACK.md`
+- `docs/EVARIAN_IMPLEMENTATION_PLAN.md`
+- `docs/EVARIAN_HERMES_ORCHESTRATION.md`
+
+## OpenAI Agents SDK Upgrade Path
+
+When API-key use is approved:
+
+1. Keep the deterministic agent contracts as guardrails.
+2. Add model-backed reasoning inside individual agents, not in the UI.
+3. Keep `policy`, `verification`, and `execution` deterministic where possible.
+4. Add evals for:
+   - missing information detection
+   - forbidden auto-execution
+   - approval boundary compliance
+   - recovery routing
+   - human escalation
+5. Add supplier tools one by one and require traceable outputs before execution.
