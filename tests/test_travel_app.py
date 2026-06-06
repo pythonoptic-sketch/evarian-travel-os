@@ -29,6 +29,11 @@ class TravelAppTest(unittest.TestCase):
                 "GEMINI_API_KEY",
                 "GOOGLE_API_KEY",
                 "GEMINI_MODEL",
+                "AMADEUS_CLIENT_ID",
+                "AMADEUS_CLIENT_SECRET",
+                "AMADEUS_ENV",
+                "AMADEUS_HOSTNAME",
+                "AMADEUS_BASE_URL",
             )
         }
         os.environ["EVARIAN_DATABASE_PATH"] = str(Path(self.tmp.name) / "evarian.sqlite3")
@@ -144,7 +149,36 @@ class TravelAppTest(unittest.TestCase):
         self.assertFalse(health["model_key_configured"])
         self.assertFalse(health["gemini_key_configured"])
         self.assertEqual(health["gemini_model"], "gemini-3.5-flash")
+        self.assertFalse(health["suppliers"]["amadeus"]["configured"])
+        self.assertFalse(health["suppliers"]["amadeus"]["client_id_configured"])
+        self.assertFalse(health["suppliers"]["amadeus"]["client_secret_configured"])
         self.assertNotIn("api_key", health)
+        self.assertNotIn("client_secret", health["suppliers"]["amadeus"])
+
+    def test_amadeus_status_endpoint_is_credential_gated(self) -> None:
+        response = self.client.get("/api/suppliers/amadeus/status")
+
+        self.assertEqual(response.status_code, 200)
+        status = response.json()
+        self.assertFalse(status["configured"])
+        self.assertEqual(status["environment"], "test")
+        self.assertIn("flight_offers_search", status["supported"])
+        self.assertFalse(status["side_effects_enabled"])
+
+    def test_amadeus_flight_offers_requires_credentials(self) -> None:
+        response = self.client.post(
+            "/api/suppliers/amadeus/flight-offers",
+            json={
+                "origin_location_code": "SFO",
+                "destination_location_code": "JFK",
+                "departure_date": "2026-07-15",
+                "adults": 1,
+                "max_results": 3,
+            },
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "amadeus credentials are not configured")
 
     def test_policy_gate_blocks_irreversible_action_without_approval(self) -> None:
         created = self.client.post(

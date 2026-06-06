@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
+from backend.amadeus_client import amadeus_runtime_status
 from backend.travel_governance import (
     GOVERNANCE_VERSION,
     build_governance_context,
@@ -875,6 +876,7 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
     missing_inputs = _missing_inputs(cities, lowered, intent_kind)
     permissions = _permission_model(wallet_cap, risk_mode)
     products = _products(intent_kind, route, wallet_cap, priority)
+    supplier_status = {"amadeus": amadeus_runtime_status()}
 
     selected_agents = ["context", "profile", "policy", "search"]
     if any(service in services for service in ("flight", "hotel", "car_rental", "private_aviation")):
@@ -950,7 +952,12 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
             "source_plans": governance["source_plans"],
             "source_classes": ["air", "hotel", "ground_transport", "maps", "weather", "traffic", "supplier_terms"],
             "candidate_count": 8 if intent_kind != "assist" else 3,
-            "live_supplier_access": "not_connected",
+            "supplier_rails": supplier_status,
+            "live_supplier_access": (
+                "amadeus_flight_offers_configured"
+                if supplier_status["amadeus"]["configured"]
+                else "credential_gated"
+            ),
         },
         ["pricing_watch", "points_rewards", "maps_location", "supplier_verification", "recommendation", "verification"],
     )

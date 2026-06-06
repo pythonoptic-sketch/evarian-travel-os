@@ -15,6 +15,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from backend.agentic_travel import model_runtime_status, run_agentic_travel_agents
+from backend.amadeus_client import (
+    AmadeusAPIError,
+    AmadeusClient,
+    AmadeusConfigError,
+    amadeus_runtime_status,
+)
 from backend.travel_policy import evaluate_action_policy
 
 
@@ -143,6 +149,23 @@ class ProposedActionBody(BaseModel):
     duration_hours: Optional[float] = Field(default=None, ge=0, le=72)
     premium_cabin: bool = False
     points_requested: bool = False
+
+
+class FlightOffersSearchBody(BaseModel):
+    origin_location_code: str = Field(pattern="^[A-Za-z]{3}$")
+    destination_location_code: str = Field(pattern="^[A-Za-z]{3}$")
+    departure_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    adults: int = Field(default=1, ge=1, le=9)
+    return_date: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    children: int = Field(default=0, ge=0, le=9)
+    infants: int = Field(default=0, ge=0, le=9)
+    travel_class: Optional[str] = Field(
+        default=None,
+        pattern="^(ECONOMY|PREMIUM_ECONOMY|BUSINESS|FIRST)$",
+    )
+    non_stop: Optional[bool] = None
+    currency_code: Optional[str] = Field(default=None, pattern="^[A-Za-z]{3}$")
+    max_results: int = Field(default=10, ge=1, le=50)
 
 
 app = FastAPI(title="Evarian Travel OS", version="0.1.0")
@@ -285,8 +308,40 @@ def health() -> dict[str, Any]:
         "service": "evarian-travel-os",
         "database": str(DB_PATH),
         **model_status,
+        "suppliers": {
+            "amadeus": amadeus_runtime_status(),
+        },
         "time": utc_now(),
     }
+
+
+@app.get("/api/suppliers/amadeus/status")
+def amadeus_status() -> dict[str, Any]:
+    return amadeus_runtime_status()
+
+
+@app.post("/api/suppliers/amadeus/flight-offers")
+def amadeus_flight_offers(body: FlightOffersSearchBody) -> dict[str, Any]:
+    try:
+        result = AmadeusClient().flight_offers_search(
+            origin_location_code=body.origin_location_code,
+            destination_location_code=body.destination_location_code,
+            departure_date=body.departure_date,
+            adults=body.adults,
+            return_date=body.return_date,
+            children=body.children,
+            infants=body.infants,
+            travel_class=body.travel_class,
+            non_stop=body.non_stop,
+            currency_code=body.currency_code,
+            max_results=body.max_results,
+        )
+    except AmadeusConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AmadeusAPIError as exc:
+        status_code = exc.status_code if 400 <= exc.status_code < 500 else 502
+        raise HTTPException(status_code=status_code, detail=exc.detail) from exc
+    return result
 
 
 @app.get("/api/demo-trip")

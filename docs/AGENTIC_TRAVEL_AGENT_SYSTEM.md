@@ -98,6 +98,13 @@ The current frontend intentionally keeps these internals hidden. The backend
 still stores and returns them for future dashboards, internal operator tools,
 and product debugging.
 
+`GET /api/suppliers/amadeus/status` returns Amadeus supplier readiness without
+exposing credentials.
+
+`POST /api/suppliers/amadeus/flight-offers` performs live Amadeus Flight Offers
+Search once `AMADEUS_CLIENT_ID` and `AMADEUS_CLIENT_SECRET` are configured on
+the backend. It is search-only and has no supplier side effects.
+
 `POST /api/trip-orders/{order_id}/actions/evaluate` evaluates a proposed
 supplier/payment action against the policy gate. It returns:
 
@@ -125,19 +132,23 @@ the travel operating heuristics as deterministic rules:
 ## Current Limitation
 
 The orchestration layer is deterministic and provider-neutral by default. The
-server has a gated OpenAI adapter, but live model calls require an active
-OpenAI billing account. The product is not yet connected to live supplier APIs.
-That is deliberate until:
+server has gated OpenAI/Gemini adapters, but live model calls require active
+provider keys and billing. The first live supplier rail is Amadeus Flight Offers
+Search, but it remains credential-gated and search-only. That is deliberate
+until:
 
-1. OpenAI API billing is active for the deployed backend key.
-2. Supplier APIs are selected and credentials are configured.
+1. Model API billing is active for the deployed backend key.
+2. Supplier API credentials are configured in the server environment.
 3. The execution agent has real approval, audit, and rollback controls.
+4. Booking, payment, cancellation, and recovery state are fully represented in
+   the Universal Trip Order.
 
 Related policy docs:
 
 - `docs/EVARIAN_POLICY_PACK.md`
 - `docs/EVARIAN_IMPLEMENTATION_PLAN.md`
 - `docs/EVARIAN_HERMES_ORCHESTRATION.md`
+- `docs/AMADEUS_INTEGRATION.md`
 
 ## OpenAI Agents SDK Upgrade Path
 
