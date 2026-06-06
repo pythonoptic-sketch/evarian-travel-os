@@ -17,6 +17,7 @@ htmlcov/
 *.local.env
 .env
 .env.*
+!backend/.env.example
 
 # Secrets
 *secret*

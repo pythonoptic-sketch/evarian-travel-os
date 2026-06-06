@@ -27,8 +27,12 @@ backend/travel_policy.py   Action authorization policy gate
 deploy/caddy/Caddyfile     Hetzner/Caddy routing
 deploy/systemd/            API service definition
 docs/                      Product, policy, and agent architecture
+docs/DEVELOPER_HANDOFF.md  Integration guide for outside developers
 tests/test_travel_app.py   Backend tests
 ```
+
+For a complete integration brief, start with
+[`docs/DEVELOPER_HANDOFF.md`](docs/DEVELOPER_HANDOFF.md).
 
 ## Local Backend
 
@@ -54,10 +58,12 @@ Environment variables:
 
 ```bash
 EVARIAN_MODEL_AGENTS_ENABLED=true
-EVARIAN_MODEL_PROVIDER=gemini
-GEMINI_MODEL=gemini-3.5-flash
-GEMINI_API_KEY=
+EVARIAN_MODEL_PROVIDER=openai
+OPENAI_MODEL=gpt-5.4-mini
+OPENAI_API_KEY=
 ```
+
+See `backend/.env.example` and `deploy/backend.env.example` for safe templates.
 
 The website must never receive model API keys in frontend JavaScript.
 
