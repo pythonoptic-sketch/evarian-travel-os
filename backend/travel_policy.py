@@ -11,8 +11,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from backend.travel_governance import GOVERNANCE_VERSION, evidence_requirements_for_action
 
-LOW_RISK_ACTIONS = {"search", "rank", "message", "escalate"}
+
+LOW_RISK_ACTIONS = {"search", "rank", "compare", "monitor", "message", "escalate"}
 IRREVERSIBLE_ACTIONS = {"book", "pay", "cancel", "refund", "rebook", "modify"}
 SUPPORTED_ACTIONS = LOW_RISK_ACTIONS | IRREVERSIBLE_ACTIONS | {"hold"}
 
@@ -83,9 +85,21 @@ def evaluate_action_policy(permissions: dict[str, Any], proposed_action: dict[st
     user_approved = bool(proposed_action.get("user_approved", False))
     within_supplier_terms = bool(proposed_action.get("within_supplier_terms", False))
     model_confidence = int(proposed_action.get("model_confidence") or 0)
+    because = str(proposed_action.get("because") or "").strip()
+    source_count = int(proposed_action.get("source_count") or 0)
+    direct_supplier_verified = bool(proposed_action.get("direct_supplier_verified", False))
+    maps_verified = bool(proposed_action.get("maps_verified", False))
+    points_checked = bool(proposed_action.get("points_checked", False))
+    price_history_checked = bool(proposed_action.get("price_history_checked", False))
+    credit_card_fit_checked = bool(proposed_action.get("credit_card_fit_checked", False))
+    insurance_verified = bool(proposed_action.get("insurance_verified", False))
+    logistics_verified = bool(proposed_action.get("logistics_verified", False))
+    traveler_profile_applied = bool(proposed_action.get("traveler_profile_applied", False))
     autonomy_level = int(permissions.get("autonomy_level") or 1)
     cap = _budget_cap_for_action(action_type, permissions)
     autopilot_preapproved = _autopilot_preapproved(action_type, amount, service_type, permissions)
+    evidence_requirements = evidence_requirements_for_action(action_type, service_type, proposed_action)
+    canonical_service_type = str(evidence_requirements["service_type"])
 
     gates = [
         PolicyGate(
@@ -133,6 +147,61 @@ def evaluate_action_policy(permissions: dict[str, Any], proposed_action: dict[st
             user_approved or autopilot_preapproved if action_type in IRREVERSIBLE_ACTIONS else True,
             "traveler approval or scoped autopilot preapproval is required before irreversible execution",
         ),
+        PolicyGate(
+            "traveler_profile",
+            traveler_profile_applied or not evidence_requirements["requires_traveler_profile"],
+            "recommendations and supplier actions must apply the traveler's preference profile",
+        ),
+        PolicyGate(
+            "because_rationale",
+            len(because) >= 12 or not evidence_requirements["requires_because"],
+            "ranked, held, and executable actions must explain why this option fits the traveler",
+        ),
+        PolicyGate(
+            "source_comparison",
+            source_count >= int(evidence_requirements["minimum_source_count"]),
+            f"{source_count} sources checked, {evidence_requirements['minimum_source_count']} required",
+        ),
+        PolicyGate(
+            "direct_supplier_verification",
+            direct_supplier_verified or not evidence_requirements["requires_direct_supplier_verification"],
+            "price, availability, and terms must be verified directly with the supplier before holds or side effects",
+        ),
+        PolicyGate(
+            "maps_location",
+            maps_verified or not evidence_requirements["requires_maps_verification"],
+            "location, distance, traffic, access, and pickup/dropoff logistics must be checked when relevant",
+        ),
+        PolicyGate(
+            "points_rewards",
+            points_checked or not evidence_requirements["requires_points_check"],
+            "long-haul, premium, or points-sensitive flights require cash-versus-points analysis",
+        ),
+        PolicyGate(
+            "price_history",
+            price_history_checked or not evidence_requirements["requires_price_history_check"],
+            "spend-bearing travel actions require current price and price-history/outlier review",
+        ),
+        PolicyGate(
+            "credit_card_fit",
+            credit_card_fit_checked or not evidence_requirements["requires_credit_card_fit_check"],
+            "flight, hotel, and car spend must consider points, portal, insurance, and card fit",
+        ),
+        PolicyGate(
+            "insurance",
+            insurance_verified or not evidence_requirements["requires_insurance_check"],
+            "car rental actions require credit-card and supplier insurance checks",
+        ),
+        PolicyGate(
+            "logistics",
+            logistics_verified or not evidence_requirements["requires_logistics_check"],
+            "ground, villa, and car decisions must verify arrival, baggage, group, and pickup logistics",
+        ),
+        PolicyGate(
+            "human_review_scope",
+            not evidence_requirements["human_review_required"],
+            "private aviation and high-complexity supplier actions require human ops review before execution",
+        ),
     ]
 
     failed = [gate for gate in gates if not gate.passed]
@@ -145,9 +214,30 @@ def evaluate_action_policy(permissions: dict[str, Any], proposed_action: dict[st
     elif action_type in IRREVERSIBLE_ACTIONS and not failed:
         decision = "execution_allowed"
         next_step = "Execution is allowed by policy, but the execution controller must still record an audit event."
+    elif any(
+        gate.name
+        in {
+            "traveler_profile",
+            "because_rationale",
+            "source_comparison",
+            "direct_supplier_verification",
+            "maps_location",
+            "points_rewards",
+            "price_history",
+            "credit_card_fit",
+            "insurance",
+            "logistics",
+        }
+        for gate in failed
+    ):
+        decision = "research_required"
+        next_step = "Gather the missing travel evidence before recommending, holding, booking, paying, cancelling, modifying, or rebooking."
     elif any(gate.name in {"supplier_reliability", "supplier_terms", "model_confidence"} for gate in failed):
         decision = "human_review"
         next_step = "Escalate to human travel ops or request more evidence before proceeding."
+    elif any(gate.name == "human_review_scope" for gate in failed):
+        decision = "human_review"
+        next_step = "Escalate this supplier action to human travel ops before execution."
     else:
         decision = "approval_required"
         next_step = "Ask the traveler to approve or adjust permissions before execution."
@@ -156,12 +246,14 @@ def evaluate_action_policy(permissions: dict[str, Any], proposed_action: dict[st
         "decision": decision,
         "action_type": action_type,
         "amount": amount,
-        "service_type": service_type,
+        "service_type": canonical_service_type,
         "cap": cap,
+        "governance_version": GOVERNANCE_VERSION,
+        "evidence_requirements": evidence_requirements,
         "autopilot_preapproved": autopilot_preapproved,
         "gates": [gate.as_dict() for gate in gates],
         "failed_gates": [gate.name for gate in failed],
         "can_execute": decision == "execution_allowed",
-        "requires_approval": decision in {"approval_required", "human_review"},
+        "requires_approval": decision in {"approval_required", "human_review", "research_required"},
         "next_step": next_step,
     }

@@ -118,11 +118,20 @@ class TravelAppTest(unittest.TestCase):
         delegated = [item["agent_id"] for item in order["delegation_plan"]]
         self.assertEqual(order["route"], "San Francisco -> New York")
         self.assertIn("search", delegated)
+        self.assertIn("pricing_watch", delegated)
+        self.assertIn("points_rewards", delegated)
+        self.assertIn("maps_location", delegated)
+        self.assertIn("supplier_verification", delegated)
         self.assertIn("recommendation", delegated)
         self.assertIn("execution", delegated)
         self.assertEqual(order["agent_outputs"][0]["agent_id"], "manager")
         self.assertIn("agent_network", order)
+        self.assertIn("governance", order)
+        self.assertIn("flight", order["source_plans"])
+        self.assertIn("hotel", order["source_plans"])
+        self.assertTrue(all("because" in product for product in order["products"]))
         self.assertIn("command-first traveler intent capture", order["extracted_requirements"])
+        self.assertIn("recommendations must include because-rationale tied to user fit and evidence", order["extracted_requirements"])
         self.assertFalse(order["autopilot"]["can_auto_execute"])
 
     def test_health_reports_model_runtime_without_exposing_keys(self) -> None:
@@ -201,6 +210,120 @@ class TravelAppTest(unittest.TestCase):
         self.assertFalse(policy["can_execute"])
         self.assertFalse(policy["requires_approval"])
 
+    def test_policy_gate_requires_hotel_ranking_evidence(self) -> None:
+        created = self.client.post(
+            "/api/trip-orders",
+            json={
+                "intent": "Find a quiet hotel near SoHo for next Tuesday.",
+                "wallet_cap": 500,
+                "risk_mode": "balanced",
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+        order = created.json()
+
+        missing_evidence = self.client.post(
+            f"/api/trip-orders/{order['id']}/actions/evaluate",
+            json={
+                "action_type": "rank",
+                "service_type": "hotel",
+                "description": "Rank hotel candidates",
+                "supplier_reliable": True,
+                "within_supplier_terms": True,
+                "model_confidence": 91,
+            },
+        )
+        self.assertEqual(missing_evidence.status_code, 200)
+        policy = missing_evidence.json()["policy"]
+        self.assertEqual(policy["decision"], "research_required")
+        self.assertIn("traveler_profile", policy["failed_gates"])
+        self.assertIn("because_rationale", policy["failed_gates"])
+        self.assertIn("source_comparison", policy["failed_gates"])
+        self.assertIn("maps_location", policy["failed_gates"])
+
+        complete_evidence = self.client.post(
+            f"/api/trip-orders/{order['id']}/actions/evaluate",
+            json={
+                "action_type": "rank",
+                "service_type": "hotel",
+                "description": "Rank hotel candidates",
+                "supplier_reliable": True,
+                "within_supplier_terms": True,
+                "model_confidence": 91,
+                "because": "This hotel set fits the traveler because it balances SoHo access, room quality, refundability, and price.",
+                "source_count": 3,
+                "maps_verified": True,
+                "traveler_profile_applied": True,
+            },
+        )
+        self.assertEqual(complete_evidence.status_code, 200)
+        policy = complete_evidence.json()["policy"]
+        self.assertEqual(policy["decision"], "prepare")
+        self.assertNotIn("because_rationale", policy["failed_gates"])
+        self.assertNotIn("source_comparison", policy["failed_gates"])
+        self.assertNotIn("maps_location", policy["failed_gates"])
+
+    def test_policy_gate_requires_points_for_long_flight_hold(self) -> None:
+        created = self.client.post(
+            "/api/trip-orders",
+            json={
+                "intent": "Hold a business class option from Los Angeles to Paris next Friday if the points value is good.",
+                "wallet_cap": 2000,
+                "risk_mode": "balanced",
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+        order = created.json()
+
+        evaluation = self.client.post(
+            f"/api/trip-orders/{order['id']}/actions/evaluate",
+            json={
+                "action_type": "hold",
+                "service_type": "flight",
+                "description": "Hold a long-haul business class flight",
+                "amount": 0,
+                "refundable": True,
+                "supplier_reliable": True,
+                "within_supplier_terms": True,
+                "model_confidence": 93,
+                "because": "This flight is recommended because it protects sleep, arrival timing, and business-class redemption value.",
+                "source_count": 2,
+                "direct_supplier_verified": True,
+                "traveler_profile_applied": True,
+                "duration_hours": 10,
+                "premium_cabin": True,
+            },
+        )
+        self.assertEqual(evaluation.status_code, 200)
+        policy = evaluation.json()["policy"]
+        self.assertEqual(policy["decision"], "research_required")
+        self.assertIn("points_rewards", policy["failed_gates"])
+
+        with_points = self.client.post(
+            f"/api/trip-orders/{order['id']}/actions/evaluate",
+            json={
+                "action_type": "hold",
+                "service_type": "flight",
+                "description": "Hold a long-haul business class flight",
+                "amount": 0,
+                "refundable": True,
+                "supplier_reliable": True,
+                "within_supplier_terms": True,
+                "model_confidence": 93,
+                "because": "This flight is recommended because it protects sleep, arrival timing, and business-class redemption value.",
+                "source_count": 2,
+                "direct_supplier_verified": True,
+                "traveler_profile_applied": True,
+                "duration_hours": 10,
+                "premium_cabin": True,
+                "points_checked": True,
+            },
+        )
+        self.assertEqual(with_points.status_code, 200)
+        policy = with_points.json()["policy"]
+        self.assertEqual(policy["decision"], "hold")
+        self.assertNotIn("points_rewards", policy["failed_gates"])
+
     def test_scoped_autopilot_can_authorize_airport_ride_under_cap(self) -> None:
         created = self.client.post(
             "/api/trip-orders",
@@ -237,6 +360,11 @@ class TravelAppTest(unittest.TestCase):
                 "model_confidence": 93,
                 "payment_authorized": True,
                 "user_approved": False,
+                "because": "This airport transfer fits because it is under the approved cap, matches flight timing, and has verified pickup logistics.",
+                "source_count": 1,
+                "maps_verified": True,
+                "logistics_verified": True,
+                "traveler_profile_applied": True,
             },
         )
 

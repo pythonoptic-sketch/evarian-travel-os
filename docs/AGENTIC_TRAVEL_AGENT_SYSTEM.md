@@ -90,6 +90,9 @@ The current backend composes these agents:
 - `audit_events`
 - `monitoring`
 - `allowed_actions`
+- `governance`
+- `source_plans`
+- `action_parameters`
 
 The current frontend intentionally keeps these internals hidden. The backend
 still stores and returns them for future dashboards, internal operator tools,
@@ -107,6 +110,17 @@ supplier/payment action against the policy gate. It returns:
 
 This endpoint is the first concrete execution-safety primitive. Supplier and
 payment tools must call it before performing side effects.
+
+The action policy is now backed by `backend/travel_governance.py`, which embeds
+the travel operating heuristics as deterministic rules:
+
+- every recommendation needs a `because`
+- flights start with overview sources and move to direct supplier verification
+- long-haul, premium, and points-sensitive flights need rewards analysis
+- hotels and villas need maps/location/logistics evidence
+- car rentals need pickup friction and insurance evidence
+- private aviation actions require human review
+- every spend-bearing action needs payment, supplier terms, and audit control
 
 ## Current Limitation
 

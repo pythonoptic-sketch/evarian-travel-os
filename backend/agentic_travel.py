@@ -17,6 +17,11 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
+from backend.travel_governance import (
+    GOVERNANCE_VERSION,
+    build_governance_context,
+)
+
 
 @dataclass(frozen=True)
 class AgentSpec:
@@ -86,6 +91,34 @@ AGENT_SPECS = [
         "flight, hotel, ride, rail, and activity candidate discovery",
         "new trip, trip change, recovery, or supplier action",
         "candidate inventory set with source classes",
+    ),
+    AgentSpec(
+        "pricing_watch",
+        "Pricing Watch Agent",
+        "continuous price comparison, route price history, anomaly detection",
+        "flight, hotel, car, or private aviation spend may occur",
+        "price evidence, outlier status, and monitoring plan",
+    ),
+    AgentSpec(
+        "points_rewards",
+        "Points and Rewards Agent",
+        "cash versus points, card portal, transfer bonus, status, and credit-card fit",
+        "long-haul, premium cabin, hotel, or car-rental optimization",
+        "points and card-fit recommendation",
+    ),
+    AgentSpec(
+        "maps_location",
+        "Maps and Location Agent",
+        "distance, access, traffic, neighborhood, topography, and logistics verification",
+        "hotel, villa, airport transfer, car rental, or group movement",
+        "maps verification report",
+    ),
+    AgentSpec(
+        "supplier_verification",
+        "Direct Supplier Verification Agent",
+        "direct airline, hotel, rental, villa, or transfer price and terms checks",
+        "before any hold, recommendation, booking, payment, cancellation, or rebooking",
+        "direct supplier evidence and terms status",
     ),
     AgentSpec(
         "policy",
@@ -284,29 +317,104 @@ def _permission_model(wallet_cap: int, risk_mode: str) -> dict[str, Any]:
 def _products(intent_kind: str, route: str, wallet_cap: int, priority: str) -> list[dict[str, str]]:
     if intent_kind == "recovery":
         return [
-            {"kind": "monitoring", "label": "Delay, waiver, traffic, hotel risk", "state": "live"},
-            {"kind": "flight", "label": "Replacement flight ranked by arrival certainty", "state": "ranked"},
-            {"kind": "hotel", "label": "Late arrival message prepared", "state": "approval"},
-            {"kind": "transfer", "label": "Pickup window recalculated", "state": "staged"},
+            {
+                "kind": "monitoring",
+                "label": "Delay, waiver, traffic, hotel risk",
+                "state": "live",
+                "because": "Recovery starts with live disruption signals before any supplier change is prepared.",
+            },
+            {
+                "kind": "flight",
+                "label": "Replacement flight ranked by arrival certainty",
+                "state": "ranked",
+                "because": "Arrival certainty protects the downstream hotel, ride, and meeting plan.",
+            },
+            {
+                "kind": "hotel",
+                "label": "Late arrival message prepared",
+                "state": "approval",
+                "because": "Hotel communication is low cost but still held for approval when it changes a supplier record.",
+            },
+            {
+                "kind": "transfer",
+                "label": "Pickup window recalculated",
+                "state": "staged",
+                "because": "The pickup must match flight timing, traffic, baggage, and user approval limits.",
+            },
         ]
     if intent_kind == "new_trip":
         return [
-            {"kind": "flight", "label": f"{route} flight candidates ranked by {priority.replace('_', ' ')}", "state": "ranked"},
-            {"kind": "hotel", "label": "Stay options ranked by fit and cancellation window", "state": "ranked"},
-            {"kind": "transfer", "label": "Airport transfer and timing buffer prepared", "state": "draft"},
-            {"kind": "wallet", "label": f"Approval cap {wallet_cap}", "state": "pending"},
+            {
+                "kind": "flight",
+                "label": f"{route} flight candidates ranked by {priority.replace('_', ' ')}",
+                "state": "ranked",
+                "because": "Flights anchor the trip timing and must be compared across overview, direct supplier, price, and points evidence.",
+            },
+            {
+                "kind": "hotel",
+                "label": "Stay options ranked by fit and cancellation window",
+                "state": "ranked",
+                "because": "The stay must fit location, room, trip purpose, cancellation risk, points value, and personal taste.",
+            },
+            {
+                "kind": "transfer",
+                "label": "Airport transfer and timing buffer prepared",
+                "state": "draft",
+                "because": "Ground timing prevents airport friction and must account for traffic, bags, and pickup location.",
+            },
+            {
+                "kind": "wallet",
+                "label": f"Approval cap {wallet_cap}",
+                "state": "pending",
+                "because": "Payment authority stays bounded until the traveler approves the exact supplier action.",
+            },
         ]
     if intent_kind == "change":
         return [
-            {"kind": "pnr", "label": "Reservation status checked", "state": "verified"},
-            {"kind": "ticket", "label": "Open ticket coupon confirmed", "state": "verified"},
-            {"kind": "emd", "label": "Seat and bag extras checked for transfer", "state": "protected"},
-            {"kind": "permission", "label": f"Ask before charges above {wallet_cap}", "state": "bounded"},
+            {
+                "kind": "pnr",
+                "label": "Reservation status checked",
+                "state": "verified",
+                "because": "Existing supplier state must be verified before a change can be prepared.",
+            },
+            {
+                "kind": "ticket",
+                "label": "Open ticket coupon confirmed",
+                "state": "verified",
+                "because": "Ticket status controls whether a change, refund, or reissue is possible.",
+            },
+            {
+                "kind": "emd",
+                "label": "Seat and bag extras checked for transfer",
+                "state": "protected",
+                "because": "Ancillaries can be lost during rebooking unless they are explicitly tracked.",
+            },
+            {
+                "kind": "permission",
+                "label": f"Ask before charges above {wallet_cap}",
+                "state": "bounded",
+                "because": "Fare differences and change fees require a clear spending boundary.",
+            },
         ]
     return [
-        {"kind": "intent", "label": "Request captured and structured", "state": "parsed"},
-        {"kind": "search", "label": "Travel search scope prepared", "state": "ready"},
-        {"kind": "permission", "label": f"Ask before charges above {wallet_cap}", "state": "bounded"},
+        {
+            "kind": "intent",
+            "label": "Request captured and structured",
+            "state": "parsed",
+            "because": "The agent must understand intent before it searches or recommends.",
+        },
+        {
+            "kind": "search",
+            "label": "Travel search scope prepared",
+            "state": "ready",
+            "because": "Search scope determines which specialist agents and evidence gates apply.",
+        },
+        {
+            "kind": "permission",
+            "label": f"Ask before charges above {wallet_cap}",
+            "state": "bounded",
+            "because": "Spend and supplier side effects stay inside the traveler-approved boundary.",
+        },
     ]
 
 
@@ -363,7 +471,7 @@ MODEL_RESPONSE_SCHEMA = {
         },
         "agent_summaries": {
             "type": "array",
-            "maxItems": 8,
+            "maxItems": 12,
             "items": {
                 "type": "object",
                 "additionalProperties": False,
@@ -374,6 +482,10 @@ MODEL_RESPONSE_SCHEMA = {
                             "context",
                             "profile",
                             "search",
+                            "pricing_watch",
+                            "points_rewards",
+                            "maps_location",
+                            "supplier_verification",
                             "policy",
                             "recommendation",
                             "verification",
@@ -515,12 +627,19 @@ def _agent_prompt(
             "permissions": deterministic["permissions"],
             "autopilot": deterministic["autopilot"],
             "products": deterministic["products"],
+            "governance_version": deterministic.get("governance_version"),
+            "governance": deterministic.get("governance"),
+            "source_plans": deterministic.get("source_plans"),
         },
         "hard_rules": [
             "Do not claim that flights, hotels, rides, payments, cancellations, refunds, holds, or supplier actions were actually executed.",
             "Every irreversible booking, payment, cancellation, refund, or rebooking requires explicit traveler approval unless a separate policy gate marks the exact action as execution_allowed.",
             "If live supplier APIs are missing, say the action is prepared or staged, not completed.",
             "Preserve the deterministic permission and approval boundaries.",
+            "Every recommendation must include a because-rationale tied to traveler fit and verified evidence.",
+            "Flights must start from overview comparison and then direct supplier verification before holds or booking.",
+            "Long-haul, premium, or points-sensitive flights require cash-versus-points and card-fit checks.",
+            "Hotels, villas, ground transport, and cars require maps or logistics checks before ranking or execution.",
             "Return only valid JSON that matches the requested contract.",
         ],
         "response_contract": MODEL_RESPONSE_SCHEMA,
@@ -746,6 +865,9 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
     """Run the managing agent and the specialist travel agents."""
 
     lowered = intent.lower()
+    governance = build_governance_context(intent, wallet_cap, risk_mode)
+    services = governance["services"]
+    traits = governance["traits"]
     intent_kind = _intent_kind(lowered)
     cities = _detected_cities(lowered)
     priority = _priority(lowered, risk_mode)
@@ -754,13 +876,24 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
     permissions = _permission_model(wallet_cap, risk_mode)
     products = _products(intent_kind, route, wallet_cap, priority)
 
-    selected_agents = ["context", "profile", "policy", "search", "recommendation", "verification", "execution"]
+    selected_agents = ["context", "profile", "policy", "search"]
+    if any(service in services for service in ("flight", "hotel", "car_rental", "private_aviation")):
+        selected_agents.append("pricing_watch")
+    if "flight" in services or "hotel" in services or traits["points_requested"] or traits["long_flight_or_premium"]:
+        selected_agents.append("points_rewards")
+    if any(service in services for service in ("hotel", "villa", "airport_ride", "ground_transport", "car_rental")):
+        selected_agents.append("maps_location")
+    if any(service in services for service in ("flight", "hotel", "villa", "car_rental", "private_aviation")):
+        selected_agents.append("supplier_verification")
     if intent_kind == "recovery":
-        selected_agents.insert(4, "recovery")
+        selected_agents.append("recovery")
+    selected_agents.extend(["recommendation", "verification", "execution"])
+    selected_agents = _unique(selected_agents)
     verification_confidence = 94 - min(len(missing_inputs) * 10, 30)
-    human_review = verification_confidence < 70 or wallet_cap >= 5000
+    human_review = verification_confidence < 70 or wallet_cap >= 5000 or "private_aviation" in services
     if human_review:
         selected_agents.append("human_ops")
+        selected_agents = _unique(selected_agents)
 
     context_output = AgentOutput(
         "context",
@@ -779,13 +912,15 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
     profile_output = AgentOutput(
         "profile",
         "Traveler profile inferred",
-        "Applied conservative default preferences until the user has saved profile memory.",
+        "Applied the traveler heuristic scaffold and conservative defaults until the user has saved profile memory.",
         78,
         {
             "schedule_bias": "protect arrival time",
             "hotel_bias": "refundable and serviceable first",
             "seat_bias": "avoid red-eye when intent suggests business travel",
             "memory_status": "session_inferred",
+            "profile_scaffold": governance["traveler_profile_scaffold"],
+            "learning_contract": governance["learning_contract"],
         },
         ["policy", "recommendation"],
     )
@@ -799,6 +934,8 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
             "risk_mode": risk_mode,
             "autonomy_level": permissions["autonomy_level"],
             "blocked_without_approval": ["flight purchase", "non-refundable hotel", "cancellation", "rebook with fare difference"],
+            "governance_version": GOVERNANCE_VERSION,
+            "global_action_parameters": governance["global_action_parameters"],
         },
         ["recommendation", "execution"],
         requires_approval=True,
@@ -806,23 +943,77 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
     search_output = AgentOutput(
         "search",
         "Travel supply search staged",
-        "Created a supplier search scope across flights, stays, transfers, and servicing constraints.",
+        "Created a supplier search scope across aggregators, direct providers, maps, stays, transfers, and servicing constraints.",
         84 if missing_inputs else 90,
         {
-            "source_classes": ["air", "hotel", "ground_transport", "weather", "traffic", "supplier_terms"],
+            "services": services,
+            "source_plans": governance["source_plans"],
+            "source_classes": ["air", "hotel", "ground_transport", "maps", "weather", "traffic", "supplier_terms"],
             "candidate_count": 8 if intent_kind != "assist" else 3,
             "live_supplier_access": "not_connected",
+        },
+        ["pricing_watch", "points_rewards", "maps_location", "supplier_verification", "recommendation", "verification"],
+    )
+    pricing_watch_output = AgentOutput(
+        "pricing_watch",
+        "Pricing watch armed",
+        "Prepared continuous comparison for current price, direct-supplier price, and route outlier detection.",
+        86,
+        {
+            "watch_targets": ["current_price", "direct_supplier_price", "route_price_history", "last_minute_changes"],
+            "applies_to": [service for service in services if service in {"flight", "hotel", "car_rental", "private_aviation"}],
+            "side_effect_gate": "price_history must pass before spend-bearing actions",
+        },
+        ["recommendation", "verification"],
+    )
+    points_rewards_output = AgentOutput(
+        "points_rewards",
+        "Points and card strategy attached",
+        "Prepared cash-versus-points, transfer partner, status, and card-fit checks before ranking expensive travel.",
+        85,
+        {
+            "program_focus": ["klm_flying_blue", "british_airways_avios", "qatar_privilege_club", "hyatt", "chase_ultimate_rewards", "bilt"],
+            "triggered_by": {
+                "long_flight_or_premium": traits["long_flight_or_premium"],
+                "points_requested": traits["points_requested"],
+                "hotel_in_scope": "hotel" in services,
+            },
+            "side_effect_gate": "credit_card_fit and points_rewards must pass when required",
+        },
+        ["recommendation", "verification"],
+    )
+    maps_location_output = AgentOutput(
+        "maps_location",
+        "Maps and logistics verification attached",
+        "Prepared location, distance, access, traffic, baggage, group, and pickup/dropoff checks.",
+        87,
+        {
+            "checks": ["distance", "neighborhood", "traffic", "pickup_dropoff", "baggage_fit", "group_logistics"],
+            "applies_to": [service for service in services if service in {"hotel", "villa", "airport_ride", "ground_transport", "car_rental"}],
+            "side_effect_gate": "maps_location and logistics must pass where required",
+        },
+        ["recommendation", "verification"],
+    )
+    supplier_verification_output = AgentOutput(
+        "supplier_verification",
+        "Direct supplier verification required",
+        "Prepared direct airline, hotel, villa, rental, or provider verification for price, availability, terms, and eligibility.",
+        88,
+        {
+            "direct_verification_services": [service for service in services if service in {"flight", "hotel", "villa", "car_rental", "private_aviation"}],
+            "checks": ["price", "availability", "refund_terms", "cancellation_window", "rate_eligibility"],
+            "side_effect_gate": "direct_supplier_verification must pass before holds or supplier side effects",
         },
         ["recommendation", "verification"],
     )
     recovery_output = AgentOutput(
         "recovery",
         "Recovery path prepared",
-        "Monitored disruption risks and staged downstream changes for hotel, ride, and notifications.",
+        "Prepared disruption monitoring, refund arguments, supplier contact packets, and downstream changes for hotel, ride, and notifications.",
         90,
         {
             "recovery_triggers": ["flight_status", "fare_waiver", "missed_connection", "hotel_check_in", "traffic"],
-            "prepared_actions": ["rank replacement flight", "move pickup", "notify hotel", "prepare team update"],
+            "prepared_actions": ["rank replacement flight", "move pickup", "notify hotel", "prepare refund argument", "prepare team update"],
         },
         ["verification", "execution"],
         requires_approval=True,
@@ -830,22 +1021,35 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
     recommendation_output = AgentOutput(
         "recommendation",
         "Recommendation ranked",
-        f"Ranked the order around {priority.replace('_', ' ')} while preserving cancellation and serviceability.",
+        f"Ranked the order around {priority.replace('_', ' ')} and required every option to include a because-rationale.",
         88,
         {
-            "ranking_model": "serviceability_first",
-            "tradeoffs": ["arrival certainty", "price", "refundability", "supplier reliability"],
+            "ranking_model": "traveler_fit_then_serviceability",
+            "tradeoffs": ["arrival certainty", "price", "points value", "location fit", "refundability", "supplier reliability"],
             "top_recommendation": products[0]["label"],
+            "because": products[0]["because"],
+            "recommendation_contract": governance["recommendation_contract"],
         },
         ["verification"],
     )
     verification_output = AgentOutput(
         "verification",
         "Order verified before execution",
-        "Checked missing inputs, approval gates, and whether the staged actions are serviceable.",
+        "Checked missing inputs, approval gates, source evidence, direct supplier verification, maps/logistics, rewards, and serviceability.",
         verification_confidence,
         {
-            "checks": ["required trip fields", "policy gates", "refundability", "payment boundary", "human fallback"],
+            "checks": [
+                "required trip fields",
+                "policy gates",
+                "because rationale",
+                "source comparison",
+                "direct supplier verification",
+                "maps and logistics",
+                "points and card fit",
+                "refundability",
+                "payment boundary",
+                "human fallback",
+            ],
             "missing_inputs": missing_inputs,
             "pass": verification_confidence >= 70,
         },
@@ -883,6 +1087,10 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
             profile_output,
             policy_output,
             search_output,
+            pricing_watch_output,
+            points_rewards_output,
+            maps_location_output,
+            supplier_verification_output,
             recovery_output,
             recommendation_output,
             verification_output,
@@ -893,8 +1101,9 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
     specialist_outputs = [output_by_agent[agent_id] for agent_id in selected_agents]
 
     manager_summary = (
-        "Delegated traveler intent to context, preference, policy, search, recommendation, "
-        "verification, and execution agents. Recovery and human-ops agents are selected only when needed."
+        "Delegated traveler intent to context, preference, policy, search, pricing, points, maps, "
+        "direct-supplier verification, recommendation, verification, and execution agents. "
+        "Recovery and human-ops agents are selected only when needed."
     )
     manager_output = AgentOutput(
         "manager",
@@ -904,7 +1113,9 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
         {
             "run_id": f"RUN-{uuid4().hex[:10].upper()}",
             "selected_agents": selected_agents,
-            "assignment_strategy": "context -> guardrails -> search -> rank -> verify -> stage execution",
+            "assignment_strategy": "context -> profile -> guardrails -> search swarm -> pricing/points/maps/supplier evidence -> rank with because -> verify -> stage execution",
+            "governance_version": GOVERNANCE_VERSION,
+            "execution_tree": governance["agent_execution_tree"],
         },
         selected_agents,
     )
@@ -937,12 +1148,21 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
             "run_id": manager_output.artifacts["run_id"],
         },
         "agent_network": [spec.as_dict() for spec in AGENT_SPECS],
+        "governance_version": GOVERNANCE_VERSION,
+        "governance": governance,
+        "action_parameters": governance["action_parameters"],
+        "source_plans": governance["source_plans"],
         "delegation_plan": delegation_plan,
         "agent_outputs": [output.as_dict() for output in outputs],
         "extracted_requirements": [
             "command-first traveler intent capture",
             "traveler preference memory",
-            "search across air, hotel, ride, rail, and downstream services",
+            "search across air, hotel, ride, maps, direct suppliers, and downstream services",
+            "Skyscanner and Google Flights overview before direct flight verification",
+            "hotel discovery through Tablet-style curation, maps, OTAs, portals, direct rates, and points checks",
+            "Google Maps location, distance, traffic, access, room, group, and baggage verification",
+            "cash-versus-points and credit-card fit checks for long-haul, premium, hotel, and car spend",
+            "recommendations must include because-rationale tied to user fit and evidence",
             "policy and wallet guardrails before action",
             "recommendation ranking by traveler priority",
             "verification before spend or supplier changes",
@@ -973,7 +1193,7 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
             "next_approval": next_approval,
         },
         "audit_events": _agent_events(outputs[:6]),
-        "monitoring": ["flight_status", "fare_waiver", "weather", "traffic", "hotel_check_in", "supplier_terms"],
-        "allowed_actions": ["search", "rank", "hold", "modify", "cancel", "refund", "rebook", "message", "escalate"],
+        "monitoring": ["flight_status", "fare_waiver", "weather", "traffic", "hotel_check_in", "supplier_terms", "price_outliers", "refund_deadlines"],
+        "allowed_actions": ["search", "compare", "monitor", "rank", "hold", "modify", "cancel", "refund", "rebook", "message", "escalate"],
     }
     return _apply_model_enrichment(base, _call_agent_model(intent, wallet_cap, risk_mode, base))

@@ -120,7 +120,7 @@ class TripEventBody(BaseModel):
 
 
 class ProposedActionBody(BaseModel):
-    action_type: str = Field(pattern="^(search|rank|hold|book|pay|cancel|refund|rebook|modify|message|escalate)$")
+    action_type: str = Field(pattern="^(search|rank|compare|monitor|hold|book|pay|cancel|refund|rebook|modify|message|escalate)$")
     service_type: str = Field(default="airport_ride", max_length=80)
     description: str = Field(default="", max_length=1000)
     amount: int = Field(default=0, ge=0, le=50000)
@@ -130,6 +130,19 @@ class ProposedActionBody(BaseModel):
     model_confidence: int = Field(default=0, ge=0, le=100)
     payment_authorized: bool = False
     user_approved: bool = False
+    because: str = Field(default="", max_length=1200)
+    source_count: int = Field(default=0, ge=0, le=30)
+    direct_supplier_verified: bool = False
+    maps_verified: bool = False
+    points_checked: bool = False
+    price_history_checked: bool = False
+    credit_card_fit_checked: bool = False
+    insurance_verified: bool = False
+    logistics_verified: bool = False
+    traveler_profile_applied: bool = False
+    duration_hours: Optional[float] = Field(default=None, ge=0, le=72)
+    premium_cabin: bool = False
+    points_requested: bool = False
 
 
 app = FastAPI(title="Evarian Travel OS", version="0.1.0")

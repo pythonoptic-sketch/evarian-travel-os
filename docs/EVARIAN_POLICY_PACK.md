@@ -61,6 +61,37 @@ Every irreversible action must pass:
 8. payment authority
 9. traveler approval unless pre-approved by scope
 
+### 2.1 Action Evidence Parameters
+
+Implemented in `backend/travel_governance.py` and enforced by
+`backend/travel_policy.py`.
+
+Recommendations, holds, and side-effect actions must carry operational
+evidence, not just model confidence:
+
+- `because_rationale`: every ranked, held, or executable action must explain
+  why it fits the traveler.
+- `traveler_profile`: recommendations and actions must apply the traveler's
+  evolving preference profile.
+- `source_comparison`: flights, hotels, villas, cars, and private aviation need
+  multiple comparison sources before ranking or execution.
+- `direct_supplier_verification`: holds and supplier side effects require direct
+  airline, hotel, rental, villa, or provider price and terms verification.
+- `maps_location`: hotels, villas, rides, ground transport, and cars require
+  location, distance, traffic, access, and logistics checks when relevant.
+- `points_rewards`: long-haul, premium, or points-sensitive flights require
+  cash-versus-points and card-fit analysis.
+- `price_history`: spend-bearing flight, hotel, car, and private aviation
+  actions require current price and outlier review.
+- `credit_card_fit`: flight, hotel, and car spend must consider points, portal,
+  insurance, and card fit.
+- `insurance`: car rentals require card and supplier insurance checks.
+- `logistics`: ground, villa, and car decisions require arrival, baggage, group,
+  and pickup logistics verification.
+
+If these evidence gates are missing, the policy endpoint returns
+`research_required` instead of allowing execution.
+
 ## 3. Autonomy Levels
 
 ### Level 1: Notify
