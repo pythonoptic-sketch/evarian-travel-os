@@ -107,6 +107,16 @@ document.getElementById("hero-command-form")?.addEventListener("submit", (event)
   runHeroAgent(intent);
 });
 
+document.querySelectorAll(".command-chips [data-prompt]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const input = document.getElementById("hero-intent");
+    if (!input) return;
+    input.value = button.dataset.prompt || "";
+    input.focus();
+    setChatStatus("Ready. Add details or press Start.");
+  });
+});
+
 document.getElementById("waitlist-form")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const email = document.getElementById("waitlist-email").value.trim();
@@ -125,4 +135,24 @@ const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
 if (heroVideo && reduceMotion?.matches) {
   heroVideo.pause();
   heroVideo.removeAttribute("autoplay");
+}
+
+const heroSource = heroVideo?.querySelector("source");
+const heroVideos = heroSource?.dataset.videos
+  ?.split(",")
+  .map((item) => item.trim())
+  .filter(Boolean) || [];
+
+if (heroVideo && heroSource && heroVideos.length > 1 && !reduceMotion?.matches) {
+  let videoIndex = 0;
+  window.setInterval(() => {
+    videoIndex = (videoIndex + 1) % heroVideos.length;
+    heroVideo.classList.add("is-switching");
+    window.setTimeout(() => {
+      heroSource.src = heroVideos[videoIndex];
+      heroVideo.load();
+      heroVideo.play().catch(() => {});
+      heroVideo.classList.remove("is-switching");
+    }, 520);
+  }, 7000);
 }
