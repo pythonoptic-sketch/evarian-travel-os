@@ -449,10 +449,10 @@ h1 {
 }
 
 .hero-thread {
-  width: min(100%, 430px);
+  width: min(100%, 520px);
   margin: 22px auto 0;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 999px;
@@ -488,11 +488,19 @@ h1 {
 
 .flow-section h2 {
   max-width: 680px;
-  margin: 0 0 34px;
+  margin: 0 0 18px;
   font-family: var(--display);
   font-size: clamp(32px, 4.4vw, 56px);
   font-weight: 620;
   line-height: 1.04;
+}
+
+.flow-lede {
+  max-width: 720px;
+  margin: 0 0 34px;
+  color: var(--soft-ink);
+  font-size: clamp(18px, 2vw, 22px);
+  line-height: 1.45;
 }
 
 .flow-list {
@@ -500,12 +508,12 @@ h1 {
   padding: 0;
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border-top: 1px solid var(--line);
 }
 
 .flow-list li {
-  min-height: 164px;
+  min-height: 184px;
   padding: 24px 26px 0 0;
   border-right: 1px solid var(--line);
 }
@@ -677,14 +685,22 @@ h1 {
   }
 
   .flow-list {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .flow-list li {
     min-height: auto;
-    padding: 24px 0;
-    border-right: 0;
+    padding: 24px 18px 24px 0;
+    border-right: 1px solid var(--line);
     border-bottom: 1px solid var(--line);
+  }
+
+  .flow-list li:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .flow-list li:nth-last-child(-n + 2) {
+    border-bottom: 0;
   }
 
   .flow-list li:last-child {
@@ -775,8 +791,36 @@ h1 {
     width: 150%;
   }
 
+  .hero-thread {
+    grid-template-columns: repeat(2, 1fr);
+    border-radius: 18px;
+  }
+
+  .hero-thread span:nth-child(3) {
+    border-left: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  .hero-thread span:nth-child(4) {
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
   .flow-section {
     padding: 58px 0 54px;
+  }
+
+  .flow-list {
+    grid-template-columns: 1fr;
+  }
+
+  .flow-list li,
+  .flow-list li:nth-child(2n) {
+    padding-right: 0;
+    border-right: 0;
+  }
+
+  .flow-list li:not(:last-child) {
+    border-bottom: 1px solid var(--line);
   }
 
   .waitlist-section {

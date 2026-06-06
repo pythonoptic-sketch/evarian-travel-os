@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 
-GOVERNANCE_VERSION = "2026-06-05.evarian-action-governance.v1"
+GOVERNANCE_VERSION = "2026-06-06.evarian-total-trip-value.v2"
 
 RECOMMENDATION_ACTIONS = {"rank", "compare", "hold"}
 SIDE_EFFECT_ACTIONS = {"book", "pay", "cancel", "refund", "rebook", "modify"}
@@ -107,6 +107,112 @@ ACTION_PARAMETERS: dict[str, Any] = {
         "allowed_preparation": ["replacement_options", "refund_argument", "hotel_message", "pickup_retime"],
         "human_fallback": ["supplier_phone_call", "reward_flight_rebooking", "complex_refund_negotiation"],
     },
+}
+
+TRIP_INTENTIONS: dict[str, dict[str, Any]] = {
+    "long_haul_luxury": {
+        "signals": ("business class", "first class", "long haul", "long-haul", "points", "miles", "award"),
+        "optimizes_for": ["cash-versus-points", "cabin comfort", "sleep", "transfer bonus"],
+    },
+    "business": {
+        "signals": ("business trip", "meeting", "investor", "conference", "work", "client"),
+        "optimizes_for": ["schedule certainty", "low friction", "arrival buffer", "direct routing"],
+    },
+    "group_social": {
+        "signals": ("friends", "group", "birthday", "wedding", "ibiza", "party", "villa"),
+        "optimizes_for": ["group movement", "luggage fit", "driver access", "shared space"],
+    },
+    "couple_escape": {
+        "signals": ("couple", "romantic", "anniversary", "spa", "quiet", "decompress"),
+        "optimizes_for": ["beauty", "privacy", "view", "calm location"],
+    },
+    "family": {
+        "signals": ("family", "kids", "children", "parents", "safe", "spacious"),
+        "optimizes_for": ["safety", "space", "predictable logistics", "refundability"],
+    },
+    "cultural": {
+        "signals": ("culture", "museum", "local", "traditional", "boutique", "walkable"),
+        "optimizes_for": ["local texture", "walkability", "visual fit", "neighborhood quality"],
+    },
+    "recovery": {
+        "signals": ("delay", "cancel", "rebook", "refund", "missed", "stranded", "waiver"),
+        "optimizes_for": ["money preservation", "arrival recovery", "supplier leverage", "human fallback"],
+    },
+}
+
+TOTAL_TRIP_VALUE_SCORE: dict[str, Any] = {
+    "doctrine": "optimize total trip value, not price alone",
+    "dimensions": [
+        "cash price",
+        "points value",
+        "comfort",
+        "time",
+        "taste",
+        "location",
+        "logistics",
+        "status and card benefits",
+        "flexibility",
+        "recovery risk",
+    ],
+    "flight_weights": {
+        "total_travel_time": 20,
+        "directness_and_connection_quality": 15,
+        "price_vs_baseline": 15,
+        "cabin_comfort": 15,
+        "award_redemption_value": 15,
+        "arrival_departure_timing": 10,
+        "baggage_fit": 5,
+        "change_flexibility": 5,
+    },
+    "hotel_weights": {
+        "location_fit": 20,
+        "visual_vibe_match": 15,
+        "room_quality_and_size": 15,
+        "price_vs_comparable_set": 15,
+        "points_status_value": 10,
+        "trip_intention_match": 10,
+        "cancellation_flexibility": 5,
+        "logistics_access": 5,
+        "hidden_outlier_potential": 5,
+    },
+    "group_logistics_weights": {
+        "transportation_simplicity": 25,
+        "luggage_fit": 20,
+        "space_and_common_area_fit": 20,
+        "driver_concierge_availability": 15,
+        "cleaning_breakfast_support": 10,
+        "event_or_nightlife_proximity": 10,
+    },
+}
+
+SCOUT_TEAMS: dict[str, list[str]] = {
+    "flight_optimization": [
+        "cash flight scout",
+        "award flight scout",
+        "nearby airport scout",
+        "direct airline verification scout",
+    ],
+    "hotel_optimization": [
+        "OTA rate scout",
+        "points and portal scout",
+        "boutique discovery scout",
+        "maps and room-fit scout",
+    ],
+    "logistics": [
+        "airport timing scout",
+        "ground transport scout",
+        "luggage and group-fit scout",
+    ],
+    "value_arbitrage": [
+        "credit-card fit scout",
+        "transfer-bonus scout",
+        "status and protection scout",
+    ],
+    "recovery": [
+        "delay and waiver monitor",
+        "refund deadline monitor",
+        "human ops handoff scout",
+    ],
 }
 
 AGENT_EXECUTION_TREE = [
@@ -274,6 +380,22 @@ def infer_trip_traits(intent: str) -> dict[str, bool]:
     }
 
 
+def infer_trip_intention(intent: str) -> dict[str, Any]:
+    lowered = intent.lower()
+    for intention, payload in TRIP_INTENTIONS.items():
+        if _contains_any(lowered, tuple(payload["signals"])):
+            return {
+                "mode": intention,
+                "optimizes_for": payload["optimizes_for"],
+                "status": "inferred",
+            }
+    return {
+        "mode": "open_travel",
+        "optimizes_for": ["balanced value", "low friction", "traveler fit", "execution certainty"],
+        "status": "default_until_clarified",
+    }
+
+
 def source_plan_for_service(service_type: str) -> dict[str, Any]:
     service = canonical_service(service_type)
     parameters = ACTION_PARAMETERS.get(service, {})
@@ -333,12 +455,16 @@ def evidence_requirements_for_action(
 def build_governance_context(intent: str, wallet_cap: int, risk_mode: str) -> dict[str, Any]:
     services = infer_services_for_intent(intent)
     traits = infer_trip_traits(intent)
+    trip_intention = infer_trip_intention(intent)
     return {
         "version": GOVERNANCE_VERSION,
         "wallet_cap": wallet_cap,
         "risk_mode": risk_mode,
         "services": services,
         "traits": traits,
+        "trip_intention": trip_intention,
+        "total_trip_value_score": TOTAL_TRIP_VALUE_SCORE,
+        "scout_teams": SCOUT_TEAMS,
         "traveler_profile_scaffold": TRAVELER_PROFILE_SCAFFOLD,
         "agent_execution_tree": AGENT_EXECUTION_TREE,
         "action_parameters": {service: ACTION_PARAMETERS.get(service, {}) for service in services},

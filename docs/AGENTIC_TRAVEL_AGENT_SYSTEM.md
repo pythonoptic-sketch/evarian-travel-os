@@ -10,7 +10,7 @@ Evarian should not behave like an itinerary generator. It should behave like a
 travel operating layer:
 
 ```txt
-traveler intent -> managed trip order -> specialist agent work -> verification -> approval-gated execution
+traveler intent -> trip intention -> traveler DNA -> scout teams -> total trip value ranking -> because recommendation -> approval-gated execution -> monitoring and recovery
 ```
 
 ## What Must Be Implemented
@@ -32,30 +32,39 @@ traveler intent -> managed trip order -> specialist agent work -> verification -
    - Early prototype uses deterministic candidate scopes.
    - Production requires supplier APIs.
 
-4. Policy and wallet guardrails
+4. Total trip value ranking
+   - Optimize across price, points, comfort, time, taste, location, logistics,
+     status, flexibility, and recovery risk.
+   - Detect trip intention before ranking.
+   - Use scout teams for flight, hotel, logistics, value arbitrage, and
+     recovery.
+
+5. Policy and wallet guardrails
    - Every request must have wallet caps and approval rules.
    - No irreversible purchase, cancellation, or rebooking should execute
      without approval.
 
-5. Recommendation and ranking
+6. Recommendation and ranking
    - Rank options by traveler priority: arrival certainty, price, comfort,
      policy safety, speed, and serviceability.
+   - Every recommendation must explain why it fits the traveler using
+     `because`.
 
-6. Verification
+7. Verification
    - Check missing inputs, supplier terms, refundability, payment boundaries,
      and whether a human fallback is required.
 
-7. Execution staging
+8. Execution staging
    - Prepare holds, messages, booking payloads, cancellation requests, and
      payment actions.
    - Keep execution staged until approval.
 
-8. Recovery
+9. Recovery
    - Monitor flight status, traffic, hotel check-in, fare waivers, weather, and
      downstream risks.
    - Prepare replacement actions when disruptions happen.
 
-9. Human escalation
+10. Human escalation
    - Package the full order context for a human operator when automation is
      unsafe, unsupported, or low-confidence.
 
@@ -93,6 +102,10 @@ The current backend composes these agents:
 - `governance`
 - `source_plans`
 - `action_parameters`
+- `trip_intention`
+- `total_trip_value_score`
+- `scout_teams`
+- `travel_dna`
 
 The current frontend intentionally keeps these internals hidden. The backend
 still stores and returns them for future dashboards, internal operator tools,
@@ -149,6 +162,8 @@ Related policy docs:
 - `docs/EVARIAN_IMPLEMENTATION_PLAN.md`
 - `docs/EVARIAN_HERMES_ORCHESTRATION.md`
 - `docs/AMADEUS_INTEGRATION.md`
+- `docs/EVARIAN_TOTAL_TRIP_VALUE_DOCTRINE.md`
+- `docs/AGENTIC_ORCHESTRATION_RUNTIME.md`
 
 ## OpenAI Agents SDK Upgrade Path
 

@@ -132,10 +132,19 @@ class TravelAppTest(unittest.TestCase):
         self.assertEqual(order["agent_outputs"][0]["agent_id"], "manager")
         self.assertIn("agent_network", order)
         self.assertIn("governance", order)
+        self.assertEqual(order["trip_intention"]["mode"], "business")
+        self.assertIn("cash price", order["total_trip_value_score"]["dimensions"])
+        self.assertIn("flight_optimization", order["scout_teams"])
+        self.assertIn("travel_dna", order)
         self.assertIn("flight", order["source_plans"])
         self.assertIn("hotel", order["source_plans"])
         self.assertTrue(all("because" in product for product in order["products"]))
         self.assertIn("command-first traveler intent capture", order["extracted_requirements"])
+        self.assertIn("trip intention detection before search", order["extracted_requirements"])
+        self.assertIn(
+            "total trip value optimization across price, points, comfort, time, taste, location, logistics, status, flexibility, and recovery risk",
+            order["extracted_requirements"],
+        )
         self.assertIn("recommendations must include because-rationale tied to user fit and evidence", order["extracted_requirements"])
         self.assertFalse(order["autopilot"]["can_auto_execute"])
 

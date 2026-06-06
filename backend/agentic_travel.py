@@ -628,6 +628,8 @@ def _agent_prompt(
             "permissions": deterministic["permissions"],
             "autopilot": deterministic["autopilot"],
             "products": deterministic["products"],
+            "trip_intention": deterministic.get("trip_intention"),
+            "total_trip_value_score": deterministic.get("total_trip_value_score"),
             "governance_version": deterministic.get("governance_version"),
             "governance": deterministic.get("governance"),
             "source_plans": deterministic.get("source_plans"),
@@ -877,6 +879,8 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
     permissions = _permission_model(wallet_cap, risk_mode)
     products = _products(intent_kind, route, wallet_cap, priority)
     supplier_status = {"amadeus": amadeus_runtime_status()}
+    trip_intention = governance["trip_intention"]
+    total_trip_value_score = governance["total_trip_value_score"]
 
     selected_agents = ["context", "profile", "policy", "search"]
     if any(service in services for service in ("flight", "hotel", "car_rental", "private_aviation")):
@@ -907,6 +911,7 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
             "route": route,
             "cities": cities,
             "priority": priority,
+            "trip_intention": trip_intention,
             "missing_inputs": missing_inputs,
         },
         ["profile", "policy", "search"],
@@ -923,6 +928,8 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
             "memory_status": "session_inferred",
             "profile_scaffold": governance["traveler_profile_scaffold"],
             "learning_contract": governance["learning_contract"],
+            "travel_dna": governance["traveler_profile_scaffold"],
+            "trip_intention": trip_intention,
         },
         ["policy", "recommendation"],
     )
@@ -951,6 +958,7 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
             "services": services,
             "source_plans": governance["source_plans"],
             "source_classes": ["air", "hotel", "ground_transport", "maps", "weather", "traffic", "supplier_terms"],
+            "scout_teams": governance["scout_teams"],
             "candidate_count": 8 if intent_kind != "assist" else 3,
             "supplier_rails": supplier_status,
             "live_supplier_access": (
@@ -1032,6 +1040,7 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
         88,
         {
             "ranking_model": "traveler_fit_then_serviceability",
+            "total_trip_value_score": total_trip_value_score,
             "tradeoffs": ["arrival certainty", "price", "points value", "location fit", "refundability", "supplier reliability"],
             "top_recommendation": products[0]["label"],
             "because": products[0]["because"],
@@ -1158,13 +1167,19 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
         "governance_version": GOVERNANCE_VERSION,
         "governance": governance,
         "action_parameters": governance["action_parameters"],
+        "trip_intention": trip_intention,
+        "total_trip_value_score": total_trip_value_score,
+        "scout_teams": governance["scout_teams"],
+        "travel_dna": governance["traveler_profile_scaffold"],
         "source_plans": governance["source_plans"],
         "delegation_plan": delegation_plan,
         "agent_outputs": [output.as_dict() for output in outputs],
         "extracted_requirements": [
             "command-first traveler intent capture",
+            "trip intention detection before search",
             "traveler preference memory",
-            "search across air, hotel, ride, maps, direct suppliers, and downstream services",
+            "total trip value optimization across price, points, comfort, time, taste, location, logistics, status, flexibility, and recovery risk",
+            "search scout teams across air, hotel, ride, maps, direct suppliers, points, cards, and downstream services",
             "Skyscanner and Google Flights overview before direct flight verification",
             "hotel discovery through Tablet-style curation, maps, OTAs, portals, direct rates, and points checks",
             "Google Maps location, distance, traffic, access, room, group, and baggage verification",
@@ -1190,6 +1205,7 @@ def run_agentic_travel_agents(intent: str, wallet_cap: int, risk_mode: str) -> d
             "can_auto_execute": False,
             "requires_approval": True,
             "approval_gate": "All booking, payment, cancellation, and rebooking actions require explicit approval.",
+            "authority_model": ["suggest", "prepare checkout", "book after approval", "auto-book under explicit limits", "autonomous recovery within permission"],
         },
         "control_center": {
             "title": "Live trip control center",

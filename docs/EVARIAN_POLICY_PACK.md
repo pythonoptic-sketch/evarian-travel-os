@@ -20,8 +20,12 @@ It is not:
 The core product promise is:
 
 ```text
-one request -> optimized recommendation -> permissioned execution -> live monitoring -> recovery
+one request -> total trip value ranking -> because recommendation -> permissioned execution -> live monitoring -> recovery
 ```
+
+Total trip value means price, points, comfort, time, taste, location,
+logistics, status, flexibility, and recovery risk. The system must optimize the
+whole trip, not only the cheapest itinerary.
 
 ## 2. Execution Policy
 

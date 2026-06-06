@@ -65,14 +65,14 @@ async function submitTripIntent(intent) {
 }
 
 async function runHeroAgent(intent) {
-  setChatStatus("Request received. Preparing the first trip brief...", true);
+  setChatStatus("Request received. Building the value-ranked trip order...", true);
   const { saved, authority } = await submitTripIntent(intent);
   setChatStatus(
     saved && authority.mode === "autopilot"
       ? `Captured. Scoped autopilot is set for airport rides up to $${authority.cap}.`
       : saved
-      ? "Captured. Evarian will ask before charges or booking."
-      : "Captured locally. The live booking agent is still coming online.",
+      ? "Captured. Evarian will explain why, then ask before charges or booking."
+      : "Captured locally. The live operator is still coming online.",
     false,
   );
 }
@@ -113,7 +113,7 @@ document.querySelectorAll(".command-chips [data-prompt]").forEach((button) => {
     if (!input) return;
     input.value = button.dataset.prompt || "";
     input.focus();
-    setChatStatus("Ready. Add details or press Start.");
+    setChatStatus("Ready. Add dates, budget, or trip style, then press Start.");
   });
 });
 
