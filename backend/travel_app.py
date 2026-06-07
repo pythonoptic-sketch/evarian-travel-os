@@ -21,6 +21,7 @@ from backend.amadeus_client import (
     AmadeusConfigError,
     amadeus_runtime_status,
 )
+from backend.travel_execution import execute_supplier_action, execution_runtime_status
 from backend.travel_policy import evaluate_action_policy
 
 
@@ -84,6 +85,23 @@ def init_db() -> None:
               detail TEXT NOT NULL,
               actor TEXT NOT NULL,
               created_at TEXT NOT NULL,
+              FOREIGN KEY(order_id) REFERENCES trip_orders(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS supplier_actions (
+              id TEXT PRIMARY KEY,
+              order_id TEXT NOT NULL,
+              supplier TEXT NOT NULL,
+              action_type TEXT NOT NULL,
+              service_type TEXT NOT NULL,
+              status TEXT NOT NULL,
+              idempotency_key TEXT,
+              proposed_action_json TEXT NOT NULL,
+              execution_payload_json TEXT NOT NULL,
+              policy_json TEXT NOT NULL,
+              response_json TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
               FOREIGN KEY(order_id) REFERENCES trip_orders(id)
             );
             """
@@ -166,6 +184,49 @@ class FlightOffersSearchBody(BaseModel):
     non_stop: Optional[bool] = None
     currency_code: Optional[str] = Field(default=None, pattern="^[A-Za-z]{3}$")
     max_results: int = Field(default=10, ge=1, le=50)
+
+
+class FlightOffersPriceBody(BaseModel):
+    flight_offers: list[dict[str, Any]] = Field(min_length=1, max_length=6)
+    include_detailed_fare_rules: bool = False
+
+
+class HotelListByCityBody(BaseModel):
+    city_code: str = Field(pattern="^[A-Za-z]{3}$")
+    radius: Optional[int] = Field(default=None, ge=1, le=300)
+    radius_unit: Optional[str] = Field(default=None, pattern="^(KM|MILE|km|mile)$")
+    chain_codes: Optional[str] = Field(default=None, max_length=80)
+    amenities: Optional[str] = Field(default=None, max_length=240)
+    ratings: Optional[str] = Field(default=None, max_length=20)
+    hotel_source: Optional[str] = Field(default=None, pattern="^(ALL|BEDBANK|DIRECTCHAIN|all|bedbank|directchain)$")
+
+
+class HotelOffersSearchBody(BaseModel):
+    hotel_ids: list[str] = Field(min_length=1, max_length=20)
+    adults: int = Field(default=1, ge=1, le=9)
+    check_in_date: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    check_out_date: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    room_quantity: int = Field(default=1, ge=1, le=9)
+    currency_code: Optional[str] = Field(default=None, pattern="^[A-Za-z]{3}$")
+    best_rate_only: Optional[bool] = None
+
+
+class HotelOfferGetBody(BaseModel):
+    offer_id: str = Field(min_length=4, max_length=220)
+
+
+class SupplierActionStageBody(BaseModel):
+    supplier: str = Field(default="amadeus", pattern="^(amadeus|manual)$")
+    proposed_action: ProposedActionBody
+    execution_payload: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: Optional[str] = Field(default=None, max_length=160)
+
+
+class SupplierActionExecuteBody(BaseModel):
+    user_approved: bool = False
+    payment_authorized: bool = False
+    dry_run: bool = False
+    additional_evidence: dict[str, Any] = Field(default_factory=dict)
 
 
 app = FastAPI(title="Evarian Travel OS", version="0.1.0")
@@ -300,6 +361,44 @@ def insert_event(conn: sqlite3.Connection, order_id: str, event: dict[str, str])
     return row
 
 
+def action_status_from_policy(policy: dict[str, Any]) -> str:
+    if policy["decision"] == "execution_allowed":
+        return "ready"
+    return str(policy["decision"])
+
+
+def row_to_supplier_action(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "order_id": row["order_id"],
+        "supplier": row["supplier"],
+        "action_type": row["action_type"],
+        "service_type": row["service_type"],
+        "status": row["status"],
+        "idempotency_key": row["idempotency_key"],
+        "proposed_action": json.loads(row["proposed_action_json"]),
+        "execution_payload": json.loads(row["execution_payload_json"]),
+        "policy": json.loads(row["policy_json"]),
+        "response": json.loads(row["response_json"]) if row["response_json"] else None,
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def fetch_supplier_action(conn: sqlite3.Connection, order_id: str, action_id: str) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        SELECT *
+        FROM supplier_actions
+        WHERE order_id = ? AND id = ?
+        """,
+        (order_id, action_id),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="supplier action not found")
+    return row_to_supplier_action(row)
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     model_status = model_runtime_status()
@@ -311,6 +410,7 @@ def health() -> dict[str, Any]:
         "suppliers": {
             "amadeus": amadeus_runtime_status(),
         },
+        "execution": execution_runtime_status(),
         "time": utc_now(),
     }
 
@@ -336,6 +436,73 @@ def amadeus_flight_offers(body: FlightOffersSearchBody) -> dict[str, Any]:
             currency_code=body.currency_code,
             max_results=body.max_results,
         )
+    except AmadeusConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AmadeusAPIError as exc:
+        status_code = exc.status_code if 400 <= exc.status_code < 500 else 502
+        raise HTTPException(status_code=status_code, detail=exc.detail) from exc
+    return result
+
+
+@app.post("/api/suppliers/amadeus/flight-offers/price")
+def amadeus_flight_offers_price(body: FlightOffersPriceBody) -> dict[str, Any]:
+    try:
+        result = AmadeusClient().flight_offers_price(
+            flight_offers=body.flight_offers,
+            include_detailed_fare_rules=body.include_detailed_fare_rules,
+        )
+    except AmadeusConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AmadeusAPIError as exc:
+        status_code = exc.status_code if 400 <= exc.status_code < 500 else 502
+        raise HTTPException(status_code=status_code, detail=exc.detail) from exc
+    return result
+
+
+@app.post("/api/suppliers/amadeus/hotels/by-city")
+def amadeus_hotels_by_city(body: HotelListByCityBody) -> dict[str, Any]:
+    try:
+        result = AmadeusClient().hotel_list_by_city(
+            city_code=body.city_code,
+            radius=body.radius,
+            radius_unit=body.radius_unit,
+            chain_codes=body.chain_codes,
+            amenities=body.amenities,
+            ratings=body.ratings,
+            hotel_source=body.hotel_source,
+        )
+    except AmadeusConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AmadeusAPIError as exc:
+        status_code = exc.status_code if 400 <= exc.status_code < 500 else 502
+        raise HTTPException(status_code=status_code, detail=exc.detail) from exc
+    return result
+
+
+@app.post("/api/suppliers/amadeus/hotel-offers")
+def amadeus_hotel_offers(body: HotelOffersSearchBody) -> dict[str, Any]:
+    try:
+        result = AmadeusClient().hotel_offers_search(
+            hotel_ids=body.hotel_ids,
+            adults=body.adults,
+            check_in_date=body.check_in_date,
+            check_out_date=body.check_out_date,
+            room_quantity=body.room_quantity,
+            currency_code=body.currency_code,
+            best_rate_only=body.best_rate_only,
+        )
+    except AmadeusConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AmadeusAPIError as exc:
+        status_code = exc.status_code if 400 <= exc.status_code < 500 else 502
+        raise HTTPException(status_code=status_code, detail=exc.detail) from exc
+    return result
+
+
+@app.post("/api/suppliers/amadeus/hotel-offer")
+def amadeus_hotel_offer(body: HotelOfferGetBody) -> dict[str, Any]:
+    try:
+        result = AmadeusClient().hotel_offer_get(offer_id=body.offer_id)
     except AmadeusConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except AmadeusAPIError as exc:
@@ -560,3 +727,177 @@ def evaluate_trip_action(order_id: str, body: ProposedActionBody) -> dict[str, A
             },
         )
     return {"ok": True, "order_id": order_id, "policy": result, "event": event}
+
+
+@app.get("/api/trip-orders/{order_id}/supplier-actions")
+def list_supplier_actions(order_id: str) -> dict[str, Any]:
+    with connect() as conn:
+        fetch_order(conn, order_id)
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM supplier_actions
+            WHERE order_id = ?
+            ORDER BY created_at DESC
+            """,
+            (order_id,),
+        ).fetchall()
+    return {"items": [row_to_supplier_action(row) for row in rows]}
+
+
+@app.post("/api/trip-orders/{order_id}/supplier-actions")
+def stage_supplier_action(order_id: str, body: SupplierActionStageBody) -> dict[str, Any]:
+    proposed_action = body.proposed_action.model_dump()
+    with connect() as conn:
+        order = fetch_order(conn, order_id)
+        permissions_row = conn.execute(
+            "SELECT payload_json FROM trip_permissions WHERE order_id = ?",
+            (order_id,),
+        ).fetchone()
+        permissions = json.loads(permissions_row["payload_json"]) if permissions_row else order["permissions"]
+        policy = evaluate_action_policy(permissions, proposed_action)
+        action_id = f"ACT-{uuid4().hex[:10].upper()}"
+        now = utc_now()
+        status = action_status_from_policy(policy)
+        conn.execute(
+            """
+            INSERT INTO supplier_actions(
+              id, order_id, supplier, action_type, service_type, status,
+              idempotency_key, proposed_action_json, execution_payload_json,
+              policy_json, response_json, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                action_id,
+                order_id,
+                body.supplier,
+                policy["action_type"],
+                policy["service_type"],
+                status,
+                body.idempotency_key,
+                json.dumps(proposed_action, sort_keys=True),
+                json.dumps(body.execution_payload, sort_keys=True),
+                json.dumps(policy, sort_keys=True),
+                None,
+                now,
+                now,
+            ),
+        )
+        event = insert_event(
+            conn,
+            order_id,
+            {
+                "event_type": "supplier_action",
+                "title": f"Supplier action staged: {status}",
+                "detail": f"{body.supplier}.{policy['service_type']}.{policy['action_type']} staged. Failed gates: {', '.join(policy['failed_gates']) or 'none'}.",
+                "actor": "execution",
+            },
+        )
+        action = fetch_supplier_action(conn, order_id, action_id)
+    return {"ok": True, "order_id": order_id, "action": action, "event": event}
+
+
+@app.get("/api/trip-orders/{order_id}/supplier-actions/{action_id}")
+def get_supplier_action(order_id: str, action_id: str) -> dict[str, Any]:
+    with connect() as conn:
+        fetch_order(conn, order_id)
+        action = fetch_supplier_action(conn, order_id, action_id)
+    return action
+
+
+@app.post("/api/trip-orders/{order_id}/supplier-actions/{action_id}/execute")
+def execute_staged_supplier_action(
+    order_id: str,
+    action_id: str,
+    body: SupplierActionExecuteBody,
+) -> dict[str, Any]:
+    with connect() as conn:
+        order = fetch_order(conn, order_id)
+        action = fetch_supplier_action(conn, order_id, action_id)
+        permissions_row = conn.execute(
+            "SELECT payload_json FROM trip_permissions WHERE order_id = ?",
+            (order_id,),
+        ).fetchone()
+        permissions = json.loads(permissions_row["payload_json"]) if permissions_row else order["permissions"]
+        proposed_action = dict(action["proposed_action"])
+        if body.user_approved:
+            proposed_action["user_approved"] = True
+        if body.payment_authorized:
+            proposed_action["payment_authorized"] = True
+        proposed_action.update(body.additional_evidence)
+        policy = evaluate_action_policy(permissions, proposed_action)
+
+        if not policy["can_execute"]:
+            response = {
+                "status": "blocked",
+                "reason": "policy did not allow execution",
+                "policy_decision": policy["decision"],
+                "failed_gates": policy["failed_gates"],
+                "side_effects": "none",
+            }
+            status = policy["decision"]
+        else:
+            try:
+                response = execute_supplier_action(
+                    supplier=action["supplier"],
+                    action_type=policy["action_type"],
+                    service_type=policy["service_type"],
+                    execution_payload=action["execution_payload"],
+                    dry_run=body.dry_run,
+                )
+            except (AmadeusConfigError, ValueError) as exc:
+                response = {
+                    "status": "blocked",
+                    "reason": str(exc),
+                    "side_effects": "none",
+                }
+            except AmadeusAPIError as exc:
+                response = {
+                    "status": "supplier_error",
+                    "status_code": exc.status_code,
+                    "reason": exc.detail,
+                    "side_effects": "unknown",
+                }
+            status = str(response.get("status") or "executed")
+
+        now = utc_now()
+        conn.execute(
+            """
+            UPDATE supplier_actions
+            SET status = ?,
+                proposed_action_json = ?,
+                policy_json = ?,
+                response_json = ?,
+                updated_at = ?
+            WHERE id = ? AND order_id = ?
+            """,
+            (
+                status,
+                json.dumps(proposed_action, sort_keys=True),
+                json.dumps(policy, sort_keys=True),
+                json.dumps(response, sort_keys=True),
+                now,
+                action_id,
+                order_id,
+            ),
+        )
+        event = insert_event(
+            conn,
+            order_id,
+            {
+                "event_type": "supplier_execution",
+                "title": f"Supplier execution: {status}",
+                "detail": f"{action['supplier']}.{policy['service_type']}.{policy['action_type']} execution evaluated with side effects: {response.get('side_effects', 'none')}.",
+                "actor": "execution",
+            },
+        )
+        updated_action = fetch_supplier_action(conn, order_id, action_id)
+    return {
+        "ok": status in {"executed", "dry_run"},
+        "order_id": order_id,
+        "action": updated_action,
+        "policy": policy,
+        "response": response,
+        "event": event,
+    }

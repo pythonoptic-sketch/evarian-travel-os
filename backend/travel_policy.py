@@ -109,13 +109,13 @@ def evaluate_action_policy(permissions: dict[str, Any], proposed_action: dict[st
         ),
         PolicyGate(
             "permission_scope",
-            autonomy_level >= 2 if action_type in LOW_RISK_ACTIONS | {"hold"} else autonomy_level >= 3,
-            f"autonomy level {autonomy_level}",
+            autonomy_level >= 2 if action_type in LOW_RISK_ACTIONS | {"hold"} else autonomy_level >= 3 or user_approved,
+            f"autonomy level {autonomy_level}, explicit approval {user_approved}",
         ),
         PolicyGate(
             "budget",
-            amount <= cap if amount > 0 else True,
-            f"amount {amount}, cap {cap}",
+            amount <= cap or user_approved if amount > 0 else True,
+            f"amount {amount}, cap {cap}, explicit approval {user_approved}",
         ),
         PolicyGate(
             "refund_risk",

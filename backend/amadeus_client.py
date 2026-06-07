@@ -1,9 +1,9 @@
 """Credential-gated Amadeus supplier client for Evarian.
 
 This module intentionally uses the Amadeus REST API directly so the deployed
-backend does not need an additional SDK dependency. It only performs supplier
-searches. Booking, payment, cancellation, and rebooking remain separate
-approval-gated actions.
+backend does not need an additional SDK dependency. Search and pricing methods
+are low-risk. Booking methods are only called by the execution controller after
+policy approval and the production side-effect switch are both enabled.
 """
 
 from __future__ import annotations
@@ -58,14 +58,28 @@ def amadeus_runtime_status() -> dict[str, Any]:
 
     client_id = os.environ.get("AMADEUS_CLIENT_ID", "").strip()
     client_secret = os.environ.get("AMADEUS_CLIENT_SECRET", "").strip()
+    side_effects_enabled = os.environ.get("EVARIAN_SUPPLIER_SIDE_EFFECTS_ENABLED", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     return {
         "configured": bool(client_id and client_secret),
         "environment": _amadeus_environment(),
         "base_url": _amadeus_base_url(),
         "client_id_configured": bool(client_id),
         "client_secret_configured": bool(client_secret),
-        "supported": ["flight_offers_search"],
-        "side_effects_enabled": False,
+        "supported": [
+            "flight_offers_search",
+            "flight_offers_price",
+            "flight_create_order",
+            "hotel_list_by_city",
+            "hotel_offers_search",
+            "hotel_offer_get",
+            "hotel_create_booking",
+        ],
+        "side_effects_enabled": side_effects_enabled,
     }
 
 
@@ -203,6 +217,218 @@ class AmadeusClient:
         )
         payload = self._request_json(req)
         return self._normalize_flight_offers(payload, params)
+
+    def flight_offers_price(
+        self,
+        *,
+        flight_offers: list[dict[str, Any]],
+        include_detailed_fare_rules: bool = False,
+    ) -> dict[str, Any]:
+        """Confirm price and availability for selected flight offers."""
+
+        token = self.access_token()
+        path = "/v1/shopping/flight-offers/pricing"
+        if include_detailed_fare_rules:
+            path = f"{path}?include=detailed-fare-rules"
+        body = json.dumps(
+            {
+                "data": {
+                    "type": "flight-offers-pricing",
+                    "flightOffers": flight_offers,
+                }
+            }
+        ).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.amadeus+json",
+                "Content-Type": "application/vnd.amadeus+json",
+                "X-HTTP-Method-Override": "GET",
+            },
+            method="POST",
+        )
+        payload = self._request_json(req)
+        return {
+            "source": "amadeus",
+            "live": True,
+            "side_effects": "none",
+            "priced": True,
+            "payload": payload,
+        }
+
+    def create_flight_order(
+        self,
+        *,
+        flight_offers: list[dict[str, Any]],
+        travelers: list[dict[str, Any]],
+        contacts: list[dict[str, Any]] | None = None,
+        remarks: dict[str, Any] | None = None,
+        ticketing_agreement: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create an Amadeus flight order.
+
+        This is a supplier side effect. It should only be reached through the
+        execution controller after policy gates, payment authority, and user
+        approval are recorded.
+        """
+
+        token = self.access_token()
+        data: dict[str, Any] = {
+            "type": "flight-order",
+            "flightOffers": flight_offers,
+            "travelers": travelers,
+        }
+        if contacts:
+            data["contacts"] = contacts
+        if remarks:
+            data["remarks"] = remarks
+        if ticketing_agreement:
+            data["ticketingAgreement"] = ticketing_agreement
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/booking/flight-orders",
+            data=json.dumps({"data": data}).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.amadeus+json",
+                "Content-Type": "application/vnd.amadeus+json",
+            },
+            method="POST",
+        )
+        payload = self._request_json(req)
+        return {
+            "source": "amadeus",
+            "live": True,
+            "side_effects": "flight_order_created",
+            "payload": payload,
+        }
+
+    def hotel_list_by_city(
+        self,
+        *,
+        city_code: str,
+        radius: int | None = None,
+        radius_unit: str | None = None,
+        chain_codes: str | None = None,
+        amenities: str | None = None,
+        ratings: str | None = None,
+        hotel_source: str | None = None,
+    ) -> dict[str, Any]:
+        token = self.access_token()
+        params: dict[str, str | int] = {"cityCode": city_code.upper()}
+        if radius is not None:
+            params["radius"] = radius
+        if radius_unit:
+            params["radiusUnit"] = radius_unit.upper()
+        if chain_codes:
+            params["chainCodes"] = chain_codes.upper()
+        if amenities:
+            params["amenities"] = amenities.upper()
+        if ratings:
+            params["ratings"] = ratings
+        if hotel_source:
+            params["hotelSource"] = hotel_source.upper()
+        query = urllib.parse.urlencode(params)
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/reference-data/locations/hotels/by-city?{query}",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.amadeus+json"},
+            method="GET",
+        )
+        payload = self._request_json(req)
+        data = payload.get("data")
+        hotels = data if isinstance(data, list) else []
+        return {
+            "source": "amadeus",
+            "live": True,
+            "side_effects": "none",
+            "search": params,
+            "count": len(hotels),
+            "hotels": hotels[:100],
+            "meta": payload.get("meta", {}),
+        }
+
+    def hotel_offers_search(
+        self,
+        *,
+        hotel_ids: list[str],
+        adults: int = 1,
+        check_in_date: str | None = None,
+        check_out_date: str | None = None,
+        room_quantity: int = 1,
+        currency_code: str | None = None,
+        best_rate_only: bool | None = None,
+    ) -> dict[str, Any]:
+        token = self.access_token()
+        params: dict[str, str | int] = {
+            "hotelIds": ",".join(hotel_ids),
+            "adults": adults,
+            "roomQuantity": room_quantity,
+        }
+        if check_in_date:
+            params["checkInDate"] = check_in_date
+        if check_out_date:
+            params["checkOutDate"] = check_out_date
+        if currency_code:
+            params["currency"] = currency_code.upper()
+        if best_rate_only is not None:
+            params["bestRateOnly"] = str(best_rate_only).lower()
+        query = urllib.parse.urlencode(params)
+        req = urllib.request.Request(
+            f"{self.base_url}/v3/shopping/hotel-offers?{query}",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.amadeus+json"},
+            method="GET",
+        )
+        payload = self._request_json(req)
+        data = payload.get("data")
+        offers = data if isinstance(data, list) else []
+        return {
+            "source": "amadeus",
+            "live": True,
+            "side_effects": "none",
+            "search": params,
+            "count": len(offers),
+            "offers": offers[:50],
+            "meta": payload.get("meta", {}),
+        }
+
+    def hotel_offer_get(self, *, offer_id: str) -> dict[str, Any]:
+        token = self.access_token()
+        req = urllib.request.Request(
+            f"{self.base_url}/v3/shopping/hotel-offers/{urllib.parse.quote(offer_id, safe='')}",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.amadeus+json"},
+            method="GET",
+        )
+        payload = self._request_json(req)
+        return {
+            "source": "amadeus",
+            "live": True,
+            "side_effects": "none",
+            "offer_id": offer_id,
+            "payload": payload,
+        }
+
+    def create_hotel_booking(self, *, booking_data: dict[str, Any]) -> dict[str, Any]:
+        """Create an Amadeus hotel booking from an already verified offer."""
+
+        token = self.access_token()
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/booking/hotel-bookings",
+            data=json.dumps({"data": booking_data}).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.amadeus+json",
+                "Content-Type": "application/vnd.amadeus+json",
+            },
+            method="POST",
+        )
+        payload = self._request_json(req)
+        return {
+            "source": "amadeus",
+            "live": True,
+            "side_effects": "hotel_booking_created",
+            "payload": payload,
+        }
 
     def _normalize_flight_offers(
         self,

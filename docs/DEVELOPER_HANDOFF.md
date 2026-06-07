@@ -7,7 +7,7 @@ This repository contains the current Evarian travel platform prototype:
 - SQLite runtime state
 - Caddy reverse proxy and systemd service for Hetzner deployment
 - deterministic agent orchestration, governance, permission gates, and audit events
-- credential-gated Amadeus flight-offer search rail
+- credential-gated Amadeus search, pricing, and policy-gated execution rails
 
 Legacy BTX mining files are intentionally not part of this GitHub mirror. The active product is Evarian.
 
@@ -43,6 +43,7 @@ backend/agentic_travel.py          Managing agent and specialist-agent orchestra
 backend/travel_governance.py       Trip intentions, total trip value score, evidence rules
 backend/travel_policy.py           Deterministic policy gates for proposed actions
 backend/amadeus_client.py          Amadeus REST client for flight-offer search
+backend/travel_execution.py        Supplier execution controller and kill switch
 backend/.env.example               Safe local env template
 deploy/backend.env.example         Server env template
 deploy/caddy/Caddyfile             drinknile.com and api.drinknile.com routing
@@ -101,9 +102,12 @@ Amadeus supplier search:
 AMADEUS_ENV=test
 AMADEUS_CLIENT_ID=<server-side secret>
 AMADEUS_CLIENT_SECRET=<server-side secret>
+EVARIAN_SUPPLIER_SIDE_EFFECTS_ENABLED=false
 ```
 
 Never expose any model, Amadeus, or Stripe key in frontend JavaScript.
+Keep supplier side effects disabled until supplier contracts, payment authority,
+approval UX, and human-ops fallback are ready.
 
 ## Implemented API
 
@@ -118,8 +122,16 @@ PUT  /api/trip-orders/{order_id}/permissions
 GET  /api/trip-orders/{order_id}/events
 POST /api/trip-orders/{order_id}/events
 POST /api/trip-orders/{order_id}/actions/evaluate
+GET  /api/trip-orders/{order_id}/supplier-actions
+POST /api/trip-orders/{order_id}/supplier-actions
+GET  /api/trip-orders/{order_id}/supplier-actions/{action_id}
+POST /api/trip-orders/{order_id}/supplier-actions/{action_id}/execute
 GET  /api/suppliers/amadeus/status
 POST /api/suppliers/amadeus/flight-offers
+POST /api/suppliers/amadeus/flight-offers/price
+POST /api/suppliers/amadeus/hotels/by-city
+POST /api/suppliers/amadeus/hotel-offers
+POST /api/suppliers/amadeus/hotel-offer
 ```
 
 Example trip order:
@@ -159,6 +171,47 @@ curl -sS https://drinknile.com/api/trip-orders/{order_id}/actions/evaluate \
   }'
 ```
 
+Example staged supplier action:
+
+```bash
+curl -sS https://drinknile.com/api/trip-orders/{order_id}/supplier-actions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "supplier": "amadeus",
+    "proposed_action": {
+      "action_type": "book",
+      "service_type": "flight",
+      "description": "Create Amadeus flight order after final fare confirmation",
+      "amount": 640,
+      "refundable": true,
+      "supplier_reliable": true,
+      "within_supplier_terms": true,
+      "model_confidence": 92,
+      "payment_authorized": true,
+      "user_approved": true,
+      "because": "The final fare was checked directly, matches the requested route, and the traveler approved the charge.",
+      "source_count": 3,
+      "direct_supplier_verified": true,
+      "points_checked": true,
+      "price_history_checked": true,
+      "credit_card_fit_checked": true,
+      "traveler_profile_applied": true
+    },
+    "execution_payload": {
+      "flight_offers": [{ "type": "flight-offer" }],
+      "travelers": [{ "id": "1", "name": { "firstName": "ALEX", "lastName": "TRAVELER" } }]
+    }
+  }'
+```
+
+Example dry-run execution:
+
+```bash
+curl -sS https://drinknile.com/api/trip-orders/{order_id}/supplier-actions/{action_id}/execute \
+  -H 'Content-Type: application/json' \
+  -d '{ "user_approved": true, "payment_authorized": true, "dry_run": true }'
+```
+
 ## What Is Real Now
 
 - The frontend command surface calls the backend.
@@ -166,7 +219,8 @@ curl -sS https://drinknile.com/api/trip-orders/{order_id}/actions/evaluate \
 - Trip orders persist in SQLite.
 - Agent orchestration returns structured trip state, specialist-agent outputs, permissions, products, and audit events.
 - Policy evaluation blocks unsafe or unsupported actions.
-- Amadeus flight-offer search is wired but disabled until credentials are installed on the server.
+- Amadeus flight/hotel search, flight pricing, and booking-method wrappers are wired but credential-gated.
+- Supplier actions can be staged, audited, dry-run, and blocked by policy or the side-effect kill switch.
 - Production routing through Caddy and systemd is represented in `deploy/`.
 
 ## What Still Needs Integration
@@ -174,8 +228,10 @@ curl -sS https://drinknile.com/api/trip-orders/{order_id}/actions/evaluate \
 - Authenticated user accounts and session management.
 - Traveler profile and preference memory per user.
 - Real payment authority through Stripe, Adyen, Airwallex, or virtual cards.
-- Flight booking, ticketing, cancellation, rebooking, refund, and servicing rails.
-- Hotel booking and cancellation rails.
+- Production supplier credentials and commercial approval.
+- Flight ticketing authority or an airline consolidator relationship.
+- Real flight ticketing, cancellation, rebooking, refund, and servicing rails.
+- Real hotel cancellation/modification rails.
 - Ride booking and live pickup monitoring rails.
 - Flight status, weather, traffic, and disruption monitoring.
 - Human ops escalation queue and operator dashboard.
@@ -189,15 +245,16 @@ curl -sS https://drinknile.com/api/trip-orders/{order_id}/actions/evaluate \
 3. Install server-side model key and run production evals against deterministic fixtures.
 4. Install Amadeus test credentials and verify live flight-offer search.
 5. Add Stripe customer/payment-method vaulting without allowing autonomous charges yet.
-6. Build the execution controller as a separate module that can only run after `travel_policy.py` returns `execution_allowed`.
+6. Run dry-run supplier-action execution against real Amadeus test payloads.
 7. Add monitoring providers and recovery events.
 8. Add a human-ops fallback queue before any irreversible supplier action goes live.
+9. Only then consider `EVARIAN_SUPPLIER_SIDE_EFFECTS_ENABLED=true` in production.
 
 ## Verification Commands
 
 ```bash
 /Applications/Codex.app/Contents/Resources/node --check assets/site.js
-python -m py_compile backend/travel_app.py backend/agentic_travel.py backend/travel_governance.py backend/travel_policy.py backend/amadeus_client.py
+python -m py_compile backend/travel_app.py backend/agentic_travel.py backend/travel_governance.py backend/travel_policy.py backend/amadeus_client.py backend/travel_execution.py
 python -m unittest tests.test_travel_app
 ```
 

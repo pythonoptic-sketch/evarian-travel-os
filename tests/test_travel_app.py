@@ -34,6 +34,7 @@ class TravelAppTest(unittest.TestCase):
                 "AMADEUS_ENV",
                 "AMADEUS_HOSTNAME",
                 "AMADEUS_BASE_URL",
+                "EVARIAN_SUPPLIER_SIDE_EFFECTS_ENABLED",
             )
         }
         os.environ["EVARIAN_DATABASE_PATH"] = str(Path(self.tmp.name) / "evarian.sqlite3")
@@ -159,6 +160,9 @@ class TravelAppTest(unittest.TestCase):
         self.assertFalse(health["gemini_key_configured"])
         self.assertEqual(health["gemini_model"], "gemini-3.5-flash")
         self.assertFalse(health["suppliers"]["amadeus"]["configured"])
+        self.assertIn("flight_create_order", health["suppliers"]["amadeus"]["supported"])
+        self.assertIn("hotel_create_booking", health["suppliers"]["amadeus"]["supported"])
+        self.assertFalse(health["execution"]["side_effects_enabled"])
         self.assertFalse(health["suppliers"]["amadeus"]["client_id_configured"])
         self.assertFalse(health["suppliers"]["amadeus"]["client_secret_configured"])
         self.assertNotIn("api_key", health)
@@ -172,6 +176,8 @@ class TravelAppTest(unittest.TestCase):
         self.assertFalse(status["configured"])
         self.assertEqual(status["environment"], "test")
         self.assertIn("flight_offers_search", status["supported"])
+        self.assertIn("flight_offers_price", status["supported"])
+        self.assertIn("hotel_offers_search", status["supported"])
         self.assertFalse(status["side_effects_enabled"])
 
     def test_amadeus_flight_offers_requires_credentials(self) -> None:
@@ -184,6 +190,15 @@ class TravelAppTest(unittest.TestCase):
                 "adults": 1,
                 "max_results": 3,
             },
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "amadeus credentials are not configured")
+
+    def test_amadeus_hotel_search_requires_credentials(self) -> None:
+        response = self.client.post(
+            "/api/suppliers/amadeus/hotels/by-city",
+            json={"city_code": "PAR", "radius": 20, "radius_unit": "KM"},
         )
 
         self.assertEqual(response.status_code, 503)
@@ -417,6 +432,174 @@ class TravelAppTest(unittest.TestCase):
         self.assertTrue(policy["can_execute"])
         self.assertTrue(policy["autopilot_preapproved"])
         self.assertNotIn("traveler_approval", policy["failed_gates"])
+
+    def test_stage_supplier_action_persists_policy_and_payload(self) -> None:
+        created = self.client.post(
+            "/api/trip-orders",
+            json={
+                "intent": "Book a flight from SFO to JFK next Tuesday after I approve the final fare.",
+                "wallet_cap": 1200,
+                "risk_mode": "balanced",
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+        order = created.json()
+
+        staged = self.client.post(
+            f"/api/trip-orders/{order['id']}/supplier-actions",
+            json={
+                "supplier": "amadeus",
+                "proposed_action": {
+                    "action_type": "book",
+                    "service_type": "flight",
+                    "description": "Create Amadeus flight order after final fare confirmation",
+                    "amount": 640,
+                    "refundable": True,
+                    "supplier_reliable": True,
+                    "within_supplier_terms": True,
+                    "model_confidence": 92,
+                    "payment_authorized": True,
+                    "user_approved": True,
+                    "because": "This flight fits because the final fare was checked directly, it matches the requested route, and the traveler approved the charge.",
+                    "source_count": 3,
+                    "direct_supplier_verified": True,
+                    "points_checked": True,
+                    "price_history_checked": True,
+                    "credit_card_fit_checked": True,
+                    "traveler_profile_applied": True,
+                },
+                "execution_payload": {
+                    "flight_offers": [{"type": "flight-offer", "id": "1"}],
+                    "travelers": [{"id": "1", "dateOfBirth": "1990-01-01", "name": {"firstName": "ALEX", "lastName": "TRAVELER"}}],
+                },
+            },
+        )
+
+        self.assertEqual(staged.status_code, 200)
+        action = staged.json()["action"]
+        self.assertEqual(action["status"], "ready")
+        self.assertEqual(action["supplier"], "amadeus")
+        self.assertEqual(action["service_type"], "flight")
+        self.assertTrue(action["policy"]["can_execute"])
+        self.assertEqual(action["execution_payload"]["flight_offers"][0]["id"], "1")
+
+        listed = self.client.get(f"/api/trip-orders/{order['id']}/supplier-actions")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json()["items"]), 1)
+
+    def test_execute_supplier_action_is_blocked_until_side_effects_enabled(self) -> None:
+        created = self.client.post(
+            "/api/trip-orders",
+            json={
+                "intent": "Book a refundable hotel after I approve the rate.",
+                "wallet_cap": 900,
+                "risk_mode": "balanced",
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+        order = created.json()
+
+        staged = self.client.post(
+            f"/api/trip-orders/{order['id']}/supplier-actions",
+            json={
+                "supplier": "amadeus",
+                "proposed_action": {
+                    "action_type": "book",
+                    "service_type": "hotel",
+                    "description": "Create Amadeus hotel booking",
+                    "amount": 420,
+                    "refundable": True,
+                    "supplier_reliable": True,
+                    "within_supplier_terms": True,
+                    "model_confidence": 94,
+                    "payment_authorized": True,
+                    "user_approved": True,
+                    "because": "This hotel fits because the room offer was verified directly, the location works, and the traveler approved the rate.",
+                    "source_count": 3,
+                    "direct_supplier_verified": True,
+                    "maps_verified": True,
+                    "price_history_checked": True,
+                    "credit_card_fit_checked": True,
+                    "traveler_profile_applied": True,
+                },
+                "execution_payload": {
+                    "booking_data": {
+                        "offerId": "ABC123",
+                        "guests": [{"id": 1, "name": {"title": "MR", "firstName": "ALEX", "lastName": "TRAVELER"}}],
+                        "payments": [{"id": 1, "method": "creditCard", "card": {"vendorCode": "VI"}}],
+                    }
+                },
+            },
+        )
+        self.assertEqual(staged.status_code, 200)
+        action_id = staged.json()["action"]["id"]
+
+        executed = self.client.post(
+            f"/api/trip-orders/{order['id']}/supplier-actions/{action_id}/execute",
+            json={"user_approved": True, "payment_authorized": True},
+        )
+
+        self.assertEqual(executed.status_code, 200)
+        payload = executed.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["response"]["status"], "blocked")
+        self.assertEqual(payload["response"]["required_env"], "EVARIAN_SUPPLIER_SIDE_EFFECTS_ENABLED=true")
+        self.assertEqual(payload["action"]["status"], "blocked")
+
+    def test_execute_supplier_action_supports_dry_run(self) -> None:
+        created = self.client.post(
+            "/api/trip-orders",
+            json={
+                "intent": "Book a refundable flight after I approve the final fare.",
+                "wallet_cap": 1200,
+                "risk_mode": "balanced",
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+        order = created.json()
+
+        staged = self.client.post(
+            f"/api/trip-orders/{order['id']}/supplier-actions",
+            json={
+                "supplier": "amadeus",
+                "proposed_action": {
+                    "action_type": "book",
+                    "service_type": "flight",
+                    "description": "Dry run Amadeus flight order",
+                    "amount": 640,
+                    "refundable": True,
+                    "supplier_reliable": True,
+                    "within_supplier_terms": True,
+                    "model_confidence": 92,
+                    "payment_authorized": True,
+                    "user_approved": True,
+                    "because": "This flight fits because the fare was verified directly, the itinerary matches, and the traveler approved it.",
+                    "source_count": 3,
+                    "direct_supplier_verified": True,
+                    "points_checked": True,
+                    "price_history_checked": True,
+                    "credit_card_fit_checked": True,
+                    "traveler_profile_applied": True,
+                },
+                "execution_payload": {
+                    "flight_offers": [{"type": "flight-offer", "id": "1"}],
+                    "travelers": [{"id": "1", "dateOfBirth": "1990-01-01", "name": {"firstName": "ALEX", "lastName": "TRAVELER"}}],
+                },
+            },
+        )
+        self.assertEqual(staged.status_code, 200)
+        action_id = staged.json()["action"]["id"]
+
+        executed = self.client.post(
+            f"/api/trip-orders/{order['id']}/supplier-actions/{action_id}/execute",
+            json={"user_approved": True, "payment_authorized": True, "dry_run": True},
+        )
+
+        self.assertEqual(executed.status_code, 200)
+        payload = executed.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["response"]["status"], "dry_run")
+        self.assertEqual(payload["action"]["status"], "dry_run")
 
 
 if __name__ == "__main__":
